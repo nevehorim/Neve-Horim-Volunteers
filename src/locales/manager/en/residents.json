@@ -125,7 +125,7 @@
     "notesPlaceholder": "Enter any additional notes about the resident",
     "enterFullName": "Enter full name",
     "enterPhoneNumber": "Enter phone number",
-    "enterPhoneNumberPlaceholder": "e.g., 050-123-4567 or 021-234-567",
+    "enterPhoneNumberPlaceholder": "e.g., +1 212 555 0123 or 0501234567",
     "enterCountry": "Enter country",
     "enterEducation": "Enter education",
     "selectGender": "Select gender",
@@ -185,7 +185,7 @@
     "loadingError": "Error loading residents:",
     "cannotDeleteWithSessions": "Cannot delete a resident with at least one session.",
     "invalidPhoneNumber": "Invalid Phone Number",
-    "invalidPhoneNumberDescription": "Phone number must be either 10 digits starting with 05 or 9 digits starting with 02, 03, 04, 08, or 09",
+    "invalidPhoneNumberDescription": "Enter a valid phone number (international like +1 212 555 0123, or local digits).",
     "invalidFullName": "Invalid Full Name",
     "invalidFullNameDescription": "Full name can only contain English letters, Hebrew letters, spaces, hyphens, and apostrophes",
     "fullNameRequired": "Full name is required",
@@ -210,7 +210,7 @@
     "nameRequired": "Name is required",
     "birthDateRequired": "Birth date is required",
     "genderRequired": "Gender is required",
-    "invalidPhoneNumber": "Phone number must be either 10 digits starting with 05 or 9 digits starting with 02, 03, 04, 08, or 09"
+    "invalidPhoneNumber": "Enter a valid phone number (international like +1 212 555 0123, or local digits)."
   },
   "actions": {
     "addResident": "Add Resident",

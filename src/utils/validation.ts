@@ -21,21 +21,25 @@ export const phoneNumberSchema = z
   .string()
   .min(1, 'Phone number is required')
   .refine((value) => {
-    // Remove any non-digit characters
-    const cleanNumber = value.replace(/\D/g, '');
+    const normalized = formatPhoneNumber(value);
+    const digits = normalized.startsWith('+') ? normalized.slice(1) : normalized;
 
-    // Check for 10 digits starting with 05
-    if (cleanNumber.length === 10 && cleanNumber.startsWith('05')) {
+    // E.164 international (max 15 digits) - allow as "+<country><number>"
+    if (normalized.startsWith('+')) {
+      return /^[1-9]\d{7,14}$/.test(digits);
+    }
+
+    // Backward compatibility: Israeli mobile/landline without country code
+    if (digits.length === 10 && digits.startsWith('05')) {
+      return true;
+    }
+    if (digits.length === 9 && /^0[23489]/.test(digits)) {
       return true;
     }
 
-    // Check for 9 digits starting with 02, 03, 04, 08, 09
-    if (cleanNumber.length === 9 && /^0[23489]/.test(cleanNumber)) {
-      return true;
-    }
-
-    return false;
-  }, 'Phone number must be either 10 digits starting with 05 or 9 digits starting with 02, 03, 04, 08, or 09');
+    // Also allow digits-only international (no "+") for convenience
+    return /^[1-9]\d{7,14}$/.test(digits);
+  }, 'Phone number must be a valid local or international phone number');
 
 // Form schemas
 export const loginSchema = z.object({
@@ -102,33 +106,37 @@ export const validatePhoneNumber = (phoneNumber: string): boolean => {
 };
 
 export const formatPhoneNumber = (phoneNumber: string): string => {
-  // Remove any non-digit characters
-  const cleanNumber = phoneNumber.replace(/\D/g, '');
+  const trimmed = phoneNumber.trim();
+  if (!trimmed) return phoneNumber;
 
-  // Format based on length and prefix
-  if (cleanNumber.length === 10 && cleanNumber.startsWith('05')) {
-    // Format: 05XXXXXXX (no dashes)
-    return cleanNumber;
+  // Allow users to type common separators; normalize for storage/validation.
+  // - Convert leading "00" to "+"
+  // - Keep a single leading "+"
+  // - Strip everything else to digits
+  const withPlus = trimmed.replace(/^00/, '+');
+  if (withPlus.startsWith('+')) {
+    const digitsOnly = withPlus.slice(1).replace(/\D/g, '');
+    return `+${digitsOnly}`;
   }
 
-  if (cleanNumber.length === 9 && /^0[23489]/.test(cleanNumber)) {
-    // Format: 0XXXXXXXX (no dashes)
-    return cleanNumber;
-  }
-
-  // Return original if not valid
-  return phoneNumber;
+  return withPlus.replace(/\D/g, '');
 };
 
 export const getPhoneNumberType = (phoneNumber: string): 'mobile' | 'landline' | 'invalid' => {
-  const cleanNumber = phoneNumber.replace(/\D/g, '');
+  const normalized = formatPhoneNumber(phoneNumber);
+  const digits = normalized.startsWith('+') ? normalized.slice(1) : normalized;
 
-  if (cleanNumber.length === 10 && cleanNumber.startsWith('05')) {
+  if (digits.length === 10 && digits.startsWith('05')) {
     return 'mobile';
   }
 
-  if (cleanNumber.length === 9 && /^0[23489]/.test(cleanNumber)) {
+  if (digits.length === 9 && /^0[23489]/.test(digits)) {
     return 'landline';
+  }
+
+  // For international numbers, we don't reliably know the type, but it's valid.
+  if (validatePhoneNumber(normalized)) {
+    return 'mobile';
   }
 
   return 'invalid';

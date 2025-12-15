@@ -96,7 +96,7 @@
     "fullNameRequired": "Full Name *",
     "phoneNumber": "Phone Number",
     "phoneNumberRequired": "Phone Number *",
-    "phoneNumberPlaceholder": "e.g., 050-123-4567 or 021-234-567",
+    "phoneNumberPlaceholder": "e.g., +1 212 555 0123 or 0501234567",
     "birthDate": "Birth Date",
     "birthDateRequired": "Birth Date *",
     "gender": "Gender",
@@ -116,7 +116,7 @@
     "notesPlaceholder": "Enter any additional notes about the volunteer",
     "enterFullName": "Enter full name",
     "enterPhoneNumber": "Enter phone number",
-    "enterPhoneNumberPlaceholder": "e.g., 050-123-4567 or 021-234-567",
+    "enterPhoneNumberPlaceholder": "e.g., +1 212 555 0123 or 0501234567",
     "enterNewPassword": "Enter new password",
     "enterGroupAffiliation": "Enter group affiliation",
     "selectGender": "Select gender",
@@ -199,7 +199,7 @@
     "createVolunteerErrorTitle": "Error creating volunteer",
     "createVolunteerErrorDescription": "An error occurred while creating the volunteer. Please try again or contact support.",
     "invalidPhoneNumber": "Invalid Phone Number",
-    "invalidPhoneNumberDescription": "Phone number must be either 10 digits starting with 05 or 9 digits starting with 02, 03, 04, 08, or 09",
+    "invalidPhoneNumberDescription": "Enter a valid phone number (international like +1 212 555 0123, or local digits).",
     "invalidFullName": "Invalid Full Name",
     "invalidFullNameDescription": "Full name can only contain English letters, Hebrew letters, spaces, hyphens, and apostrophes",
     "fullNameRequired": "Full name is required",
@@ -240,7 +240,7 @@
     "phoneRequired": "Phone number required",
     "birthDateRequired": "Birth date required",
     "genderRequired": "Gender required",
-    "invalidPhoneNumber": "Phone number must be either 10 digits starting with 05 or 9 digits starting with 02, 03, 04, 08, or 09"
+    "invalidPhoneNumber": "Enter a valid phone number (international like +1 212 555 0123, or local digits)."
   },
   "importDialog": {
     "title": "Import Volunteers",

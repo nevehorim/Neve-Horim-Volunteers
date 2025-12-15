@@ -1903,7 +1903,9 @@ const ManagerResidents = () => {
                   <Label htmlFor="phoneNumber" className="text-sm font-medium text-slate-700">{t('residents:forms.phoneNumber')}</Label>
                   <Input
                     id="phoneNumber"
-                    placeholder={t('residents:forms.enterPhoneNumber')}
+                    type="tel"
+                    inputMode="tel"
+                    placeholder={t('residents:forms.enterPhoneNumberPlaceholder')}
                     value={newResident.phoneNumber || ""}
                     onChange={(e) => {
                       setNewResident({ ...newResident, phoneNumber: e.target.value });
@@ -2267,7 +2269,9 @@ const ManagerResidents = () => {
                     <Label htmlFor="edit-phoneNumber" className="text-sm font-medium text-slate-700">{t('residents:forms.phoneNumber')}</Label>
                     <Input
                       id="edit-phoneNumber"
-                      placeholder={t('residents:forms.enterPhoneNumber')}
+                      type="tel"
+                      inputMode="tel"
+                      placeholder={t('residents:forms.enterPhoneNumberPlaceholder')}
                       value={selectedResident.phoneNumber || ""}
                       onChange={(e) => {
                         setSelectedResident({ ...selectedResident, phoneNumber: e.target.value });

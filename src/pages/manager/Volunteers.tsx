@@ -2264,7 +2264,9 @@ const ManagerVolunteers = () => {
                   <Label htmlFor="phoneNumber" className="text-sm font-medium text-slate-700">{t('forms.phoneNumberRequired')}</Label>
                   <Input
                     id="phoneNumber"
-                    placeholder={t('volunteers:forms.enterPhoneNumber')}
+                    type="tel"
+                    inputMode="tel"
+                    placeholder={t('volunteers:forms.enterPhoneNumberPlaceholder')}
                     value={newVolunteer.phoneNumber}
                     onChange={(e) => {
                       setNewVolunteer({ ...newVolunteer, phoneNumber: e.target.value });
