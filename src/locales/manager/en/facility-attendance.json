@@ -3,8 +3,8 @@
   "subtitle": "Track volunteers who checked in to the facility without appointments",
   "description": "Shows facility check-ins/out recorded by volunteers. This does not replace appointment attendance.",
   "tabs": {
-    "active": "Active now",
-    "byDate": "By date"
+    "active": "In facility now",
+    "byDate": "All (by date)"
   },
   "searchPlaceholder": "Search volunteer name or ID…",
   "count": "{{count}} record(s)",

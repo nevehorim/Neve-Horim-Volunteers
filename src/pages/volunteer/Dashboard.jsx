@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Clock, TrendingUp, Award, Calendar, CheckCircle2, AlertCircle, ChevronRight, ChevronLeft, CalendarDays, Users, Activity, FileText, Star, Target, ArrowUpRight, ArrowDownRight, Hand, UserCheck, HeartHandshake, ThumbsUp, ShieldCheck, Globe, Zap, TrendingDown } from 'lucide-react';
-import { doc, getDoc, collection, query, where, getDocs, orderBy, limit, addDoc, Timestamp } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, getDocs, orderBy, limit, addDoc, updateDoc, Timestamp } from "firebase/firestore";
 import { useTranslation } from 'react-i18next';
 import { db } from '@/lib/firebase';
 import { Layout } from '@/components/volunteer/Layout';
@@ -112,6 +112,17 @@ const Dashboard = () => {
   const [recentActivity, setRecentActivity] = useState([]);
   const [volunteer, setVolunteer] = useState(null);
   const [isLoggingSession, setIsLoggingSession] = useState(false);
+  const [facilityAttendance, setFacilityAttendance] = useState({
+    loading: false,
+    record: null,
+    checkedIn: false
+  });
+  const [todayAppointmentAttendance, setTodayAppointmentAttendance] = useState({
+    loading: false,
+    records: [],
+    hasJoined: false,
+    earliestConfirmedAt: null,
+  });
   const langToggleRef = useRef(null);
 
   // Check authentication
@@ -249,6 +260,16 @@ const Dashboard = () => {
     return timeString.replace(/״/g, '"');
   };
 
+  const formatTimeFromTimestamp = (ts) => {
+    try {
+      if (!ts) return '';
+      const d = typeof ts?.toDate === 'function' ? ts.toDate() : new Date(ts);
+      return formatTime(d, i18n.language === 'he' ? 'he-IL' : 'en-US');
+    } catch {
+      return '';
+    }
+  };
+
   // Helper function to show browser notifications
   const showNotification = (message, type = "error") => {
     const isHebrew = i18n.language === 'he';
@@ -295,6 +316,302 @@ const Dashboard = () => {
     return 'present';
   };
 
+  const getTodayStr = () => new Date().toISOString().split('T')[0];
+
+  const chunkArray = (arr, size) => {
+    const chunks = [];
+    for (let i = 0; i < arr.length; i += size) {
+      chunks.push(arr.slice(i, i + size));
+    }
+    return chunks;
+  };
+
+  const fetchFacilityAttendance = async () => {
+    if (!volunteer?.id) return;
+    setFacilityAttendance(prev => ({ ...prev, loading: true }));
+
+    try {
+      const todayStr = getTodayStr();
+      const attendanceCol = collection(db, 'attendance');
+      const q = query(
+        attendanceCol,
+        where('volunteerId.id', '==', volunteer.id),
+        where('attendanceType', '==', 'facility'),
+        where('date', '==', todayStr),
+        orderBy('confirmedAt', 'desc'),
+        limit(5)
+      );
+
+      const snap = await getDocs(q);
+      const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const activeRecord = records.find(r => !r.visitEndedAt);
+
+      setFacilityAttendance({
+        loading: false,
+        record: activeRecord || null,
+        checkedIn: Boolean(activeRecord)
+      });
+    } catch (error) {
+      console.error('Error fetching facility attendance:', error);
+      setFacilityAttendance(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const fetchTodayAppointmentAttendance = async () => {
+    if (!volunteer?.id) return;
+    const todayStr = getTodayStr();
+    const todaySessions = volunteer.appointmentHistory?.filter(a => a.date === todayStr) || [];
+    const appointmentIds = todaySessions.map(s => s.appointmentId).filter(Boolean);
+
+    if (appointmentIds.length === 0) {
+      setTodayAppointmentAttendance({ loading: false, records: [], hasJoined: false, earliestConfirmedAt: null });
+      return;
+    }
+
+    setTodayAppointmentAttendance(prev => ({ ...prev, loading: true }));
+    try {
+      const attendanceCol = collection(db, 'attendance');
+      const idChunks = chunkArray(appointmentIds, 10);
+      const snaps = await Promise.all(
+        idChunks.map(ids => {
+          const q = query(
+            attendanceCol,
+            where('volunteerId.id', '==', volunteer.id),
+            where('appointmentId', 'in', ids)
+          );
+          return getDocs(q);
+        })
+      );
+
+      const records = snaps.flatMap(s => s.docs.map(d => ({ id: d.id, ...d.data() })));
+      let earliest = null;
+      for (const r of records) {
+        if (r?.confirmedAt) {
+          const ts = r.confirmedAt;
+          if (!earliest || ts.toMillis() < earliest.toMillis()) {
+            earliest = ts;
+          }
+        }
+      }
+
+      setTodayAppointmentAttendance({
+        loading: false,
+        records,
+        hasJoined: records.length > 0,
+        earliestConfirmedAt: earliest
+      });
+    } catch (error) {
+      console.error('Error fetching today appointment attendance:', error);
+      setTodayAppointmentAttendance(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  useEffect(() => {
+    if (!volunteer?.id) return;
+    fetchFacilityAttendance();
+    fetchTodayAppointmentAttendance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [volunteer?.id]);
+
+  const getTodaySessionContext = () => {
+    const todayStr = getTodayStr();
+    const todaySessions = volunteer?.appointmentHistory?.filter(a => a.date === todayStr) || [];
+    const activeSessionsNow = todaySessions.filter(s => isWithinSessionWindow(s.startTime, s.endTime));
+    const loggedAppointmentIds = new Set(
+      (todayAppointmentAttendance.records || [])
+        .map(r => r?.appointmentId)
+        .filter(Boolean)
+    );
+    const activeSessionsNeedingLog = activeSessionsNow.filter(s => !loggedAppointmentIds.has(s.appointmentId));
+    return { todaySessions, activeSessionsNow, activeSessionsNeedingLog };
+  };
+
+  const handleFacilityCheckIn = async () => {
+    if (!volunteer) {
+      showNotification(t('dashboard.smartLogging.volunteerNotFound'), 'error');
+      return;
+    }
+
+    if (facilityAttendance.checkedIn) {
+      showNotification(t('dashboard.smartCta.alreadyCheckedIn'), 'info');
+      return;
+    }
+
+    setFacilityAttendance(prev => ({ ...prev, loading: true }));
+    try {
+      const now = Timestamp.now();
+      const todayStr = getTodayStr();
+      const attendanceCol = collection(db, 'attendance');
+
+      const attendanceData = {
+        attendanceType: 'facility',
+        appointmentId: null,
+        date: todayStr,
+        volunteerId: { id: volunteer.id, type: 'volunteer' },
+        status: 'present',
+        confirmedBy: 'volunteer',
+        confirmedAt: now,
+        visitStartedAt: now,
+        visitEndedAt: null,
+        notes: `Facility check-in by volunteer at ${new Date().toLocaleTimeString()}`
+      };
+
+      const docRef = await addDoc(attendanceCol, attendanceData);
+      setFacilityAttendance({
+        loading: false,
+        record: { id: docRef.id, ...attendanceData },
+        checkedIn: true
+      });
+
+      showNotification(t('dashboard.smartCta.checkInSuccess'), 'success');
+    } catch (error) {
+      console.error('Error checking in (facility):', error);
+      setFacilityAttendance(prev => ({ ...prev, loading: false }));
+      showNotification(t('dashboard.smartCta.checkInError'), 'error');
+    }
+  };
+
+  const handleFacilityCheckOut = async () => {
+    if (!volunteer) {
+      showNotification(t('dashboard.smartLogging.volunteerNotFound'), 'error');
+      return;
+    }
+
+    if (!facilityAttendance.record?.id) {
+      showNotification(t('dashboard.smartCta.notCheckedIn'), 'warning');
+      return;
+    }
+
+    setFacilityAttendance(prev => ({ ...prev, loading: true }));
+    try {
+      const now = Timestamp.now();
+      const attendanceCol = collection(db, 'attendance');
+      const ref = doc(attendanceCol, facilityAttendance.record.id);
+      await updateDoc(ref, {
+        visitEndedAt: now,
+        notes: `Facility check-out by volunteer at ${new Date().toLocaleTimeString()}`
+      });
+
+      setFacilityAttendance({
+        loading: false,
+        record: null,
+        checkedIn: false
+      });
+
+      showNotification(t('dashboard.smartCta.checkOutSuccess'), 'success');
+    } catch (error) {
+      console.error('Error checking out (facility):', error);
+      setFacilityAttendance(prev => ({ ...prev, loading: false }));
+      showNotification(t('dashboard.smartCta.checkOutError'), 'error');
+    }
+  };
+
+  const handleDashboardCheckOut = async () => {
+    if (!volunteer) {
+      showNotification(t('dashboard.smartLogging.volunteerNotFound'), 'error');
+      return;
+    }
+
+    setFacilityAttendance(prev => ({ ...prev, loading: true }));
+    try {
+      const now = Timestamp.now();
+      const todayStr = getTodayStr();
+      const attendanceCol = collection(db, 'attendance');
+
+      // Fast-path: if we already have an active facility record id, close it directly.
+      if (facilityAttendance.checkedIn && facilityAttendance.record?.id) {
+        const ref = doc(attendanceCol, facilityAttendance.record.id);
+        await updateDoc(ref, {
+          visitEndedAt: now,
+          notes: `Facility check-out by volunteer at ${new Date().toLocaleTimeString()}`
+        });
+
+        setFacilityAttendance({
+          loading: false,
+          record: null,
+          checkedIn: false
+        });
+
+        showNotification(t('dashboard.smartCta.checkOutSuccess'), 'success');
+        await fetchFacilityAttendance();
+        await fetchTodayAppointmentAttendance();
+        return;
+      }
+
+      // Robust-path: avoid compound queries (which may require composite indexes).
+      // Fetch recent attendance docs for this volunteer and filter client-side.
+      const recentByVolunteer = query(
+        attendanceCol,
+        where('volunteerId.id', '==', volunteer.id),
+        limit(200)
+      );
+
+      const snap = await getDocs(recentByVolunteer);
+      const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const activeFacilityRecords = records
+        .filter(r => r.attendanceType === 'facility' && r.date === todayStr && !r.visitEndedAt);
+
+      // Pick the most recent by confirmedAt
+      const activeRecord = activeFacilityRecords.sort((a, b) => {
+        const aTs = a.confirmedAt?.toDate?.() ? a.confirmedAt.toDate().getTime() : 0;
+        const bTs = b.confirmedAt?.toDate?.() ? b.confirmedAt.toDate().getTime() : 0;
+        return bTs - aTs;
+      })[0];
+
+      if (activeRecord?.id) {
+        const ref = doc(attendanceCol, activeRecord.id);
+        await updateDoc(ref, {
+          visitEndedAt: now,
+          notes: `Facility check-out by volunteer at ${new Date().toLocaleTimeString()}`
+        });
+
+        setFacilityAttendance({
+          loading: false,
+          record: null,
+          checkedIn: false
+        });
+
+        showNotification(t('dashboard.smartCta.checkOutSuccess'), 'success');
+        await fetchFacilityAttendance();
+        await fetchTodayAppointmentAttendance();
+        return;
+      }
+
+      // No active facility check-in exists.
+      // If volunteer "joined" a session today (attendance exists) but never checked in,
+      // allow a dashboard checkout by creating a closed facility record for reporting.
+      if (!todayAppointmentAttendance.hasJoined) {
+        showNotification(t('dashboard.smartCta.notEligibleForCheckout'), 'info');
+        setFacilityAttendance(prev => ({ ...prev, loading: false }));
+        return;
+      }
+
+      const startedAt = todayAppointmentAttendance.earliestConfirmedAt || now;
+
+      const attendanceData = {
+        attendanceType: 'facility',
+        appointmentId: null,
+        date: todayStr,
+        volunteerId: { id: volunteer.id, type: 'volunteer' },
+        status: 'present',
+        confirmedBy: 'volunteer',
+        confirmedAt: startedAt,
+        visitStartedAt: startedAt,
+        visitEndedAt: now,
+        notes: `Facility checkout created from session attendance at ${new Date().toLocaleTimeString()}`
+      };
+
+      await addDoc(attendanceCol, attendanceData);
+      showNotification(t('dashboard.smartCta.checkOutSuccess'), 'success');
+      await fetchFacilityAttendance();
+      await fetchTodayAppointmentAttendance();
+    } catch (error) {
+      console.error('Error creating checkout record:', error);
+      setFacilityAttendance(prev => ({ ...prev, loading: false }));
+      showNotification(t('dashboard.smartCta.checkOutError'), 'error');
+    }
+  };
+
   // Smart session logging function
   const handleSmartSessionLog = async () => {
     if (!volunteer) {
@@ -312,18 +629,18 @@ const Dashboard = () => {
         appointment.date === today
       ) || [];
 
-      if (todaySessions.length === 0) {
-        showNotification(t('dashboard.smartLogging.noAppointments'), 'info');
-        return;
-      }
-
       // Find sessions that are currently within the ±1 hour window
       const validSessions = todaySessions.filter(session => 
         isWithinSessionWindow(session.startTime, session.endTime)
       );
 
+      // If there are no active appointment sessions right now, fall back to facility check-in/out
       if (validSessions.length === 0) {
-        showNotification(t('dashboard.smartLogging.noActiveSessions'), 'info');
+        if (facilityAttendance.checkedIn) {
+          await handleFacilityCheckOut();
+        } else {
+          await handleFacilityCheckIn();
+        }
         return;
       }
 
@@ -344,7 +661,12 @@ const Dashboard = () => {
       );
 
       if (sessionsToLog.length === 0) {
-        showNotification(t('dashboard.smartLogging.alreadyLogged'), 'info');
+        // Sessions are already logged; allow the same button to report facility attendance.
+        if (facilityAttendance.checkedIn) {
+          await handleFacilityCheckOut();
+        } else {
+          await handleFacilityCheckIn();
+        }
         return;
       }
 
@@ -374,6 +696,7 @@ const Dashboard = () => {
       // Refresh data to show updated information
       await fetchVolunteerData();
       await fetchRecentActivity();
+      await fetchTodayAppointmentAttendance();
 
     } catch (error) {
       console.error('Error logging session:', error);
@@ -916,34 +1239,78 @@ const Dashboard = () => {
             {/* Left Column */}
             <div className="dash-left-column">
               {/* Check In Button */}
-              <button 
-                onClick={handleSmartSessionLog}
-                disabled={isLoggingSession}
-                className="dash-checkin-button"
-              >
-                <div className="dash-checkin-content">
-                  <div className="dash-checkin-icon-wrapper">
-                    {isLoggingSession ? (
-                      <div className="loading-spinner"></div>
-                    ) : (
-                      <CheckCircle2 className="dash-checkin-icon" />
-                    )}
-                  </div>
-                  <div className="dash-checkin-text">
-                    <span className="dash-checkin-title">
-                      {isLoggingSession ? t('dashboard.checkIn.logging') : t('dashboard.checkIn.title')}
-                    </span>
-                    <span className="dash-checkin-subtitle">
-                      {isLoggingSession ? t('dashboard.checkIn.pleaseWait') : t('dashboard.checkIn.subtitle')}
-                    </span>
-                  </div>
-                  {!isLoggingSession && (
-                    i18n.language === 'he'
-                      ? <ChevronLeft className="dash-checkin-arrow" />
-                      : <ChevronRight className="dash-checkin-arrow" />
-                  )}
-                </div>
-              </button>
+              {(() => {
+                const { activeSessionsNow, activeSessionsNeedingLog } = getTodaySessionContext();
+                const hasActiveSessionNow = activeSessionsNow.length > 0;
+                const hasUnloggedActiveSessionNow = activeSessionsNeedingLog.length > 0;
+                const ctaTitle = isLoggingSession
+                  ? t('dashboard.checkIn.logging')
+                  : hasUnloggedActiveSessionNow
+                    ? t('dashboard.checkIn.titleLogSession')
+                    : facilityAttendance.checkedIn
+                      ? t('dashboard.checkIn.titleCheckOut')
+                      : t('dashboard.checkIn.titleCheckIn');
+                const ctaSubtitle = isLoggingSession
+                  ? t('dashboard.checkIn.pleaseWait')
+                  : hasUnloggedActiveSessionNow
+                    ? t('dashboard.checkIn.subtitleLogSession')
+                    : facilityAttendance.checkedIn
+                      ? t('dashboard.checkIn.subtitleCheckOut')
+                      : t('dashboard.checkIn.subtitleCheckIn');
+                const disableCta = isLoggingSession || facilityAttendance.loading;
+
+                return (
+                  <>
+                    <div
+                      className={`dash-facility-status ${facilityAttendance.checkedIn ? 'is-in' : 'is-out'}`}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <span className="dash-facility-dot" aria-hidden="true" />
+                      <span className="dash-facility-text">
+                        {facilityAttendance.loading
+                          ? t('dashboard.facilityStatus.loading')
+                          : facilityAttendance.checkedIn
+                            ? t('dashboard.facilityStatus.inFacility', {
+                              time: formatTimeFromTimestamp(
+                                facilityAttendance.record?.visitStartedAt || facilityAttendance.record?.confirmedAt
+                              )
+                            })
+                            : todayAppointmentAttendance.hasJoined
+                              ? t('dashboard.facilityStatus.notInFacilityWithSession', {
+                                time: formatTimeFromTimestamp(todayAppointmentAttendance.earliestConfirmedAt)
+                              })
+                              : t('dashboard.facilityStatus.notInFacility')}
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={handleSmartSessionLog}
+                      disabled={disableCta}
+                      className="dash-checkin-button"
+                    >
+                      <div className="dash-checkin-content">
+                        <div className="dash-checkin-icon-wrapper">
+                          {disableCta ? (
+                            <div className="loading-spinner"></div>
+                          ) : (
+                            <CheckCircle2 className="dash-checkin-icon" />
+                          )}
+                        </div>
+                        <div className="dash-checkin-text">
+                          <span className="dash-checkin-title">{ctaTitle}</span>
+                          <span className="dash-checkin-subtitle">{ctaSubtitle}</span>
+                        </div>
+                        {!disableCta && (
+                          i18n.language === 'he'
+                            ? <ChevronLeft className="dash-checkin-arrow" />
+                            : <ChevronRight className="dash-checkin-arrow" />
+                        )}
+                      </div>
+                    </button>
+                  </>
+                );
+              })()}
 
               {/* Upcoming Sessions */}
               <div className="dash-upcoming-card">

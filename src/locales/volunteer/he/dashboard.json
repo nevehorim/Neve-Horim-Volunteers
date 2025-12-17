@@ -8,14 +8,35 @@
       "evening": "ערב טוב"
     },
     "checkIn": {
-      "title": "הגעתי",
-      "subtitle": "רשום את נוכחותך עכשיו",
+      "titleLogSession": "רישום פגישה",
+      "subtitleLogSession": "רשום את נוכחותך בפגישה עכשיו",
+      "titleCheckIn": "הגעתי",
+      "subtitleCheckIn": "רשום הגעה למוסד",
+      "titleCheckOut": "יציאה",
+      "subtitleCheckOut": "אתה מסומן כנוכח — לחץ ליציאה",
       "logging": "רושם...",
       "pleaseWait": "אנא המתן..."
     },
+    "facilityStatus": {
+      "loading": "בודק סטטוס הגעה...",
+      "inFacility": "במוסד (מאז {{time}})",
+      "notInFacilityWithSession": "לא במוסד (נרשמה פגישה ב־{{time}})",
+      "notInFacility": "לא במוסד"
+    },
+    "smartCta": {
+      "checkOutTitle": "יציאה",
+      "checkOutSubtitle": "זמין אחרי הצטרפות לפגישה או הגעה למוסד",
+      "alreadyCheckedIn": "אתה כבר מסומן כנוכח.",
+      "notCheckedIn": "אתה לא מסומן כנוכח כרגע.",
+      "notEligibleForCheckout": "יציאה זמינה אחרי הצטרפות לפגישה או הגעה למוסד.",
+      "checkInSuccess": "ההגעה נרשמה בהצלחה.",
+      "checkInError": "לא ניתן לרשום הגעה. אנא נסה שוב.",
+      "checkOutSuccess": "היציאה נרשמה בהצלחה.",
+      "checkOutError": "לא ניתן לרשום יציאה. אנא נסה שוב."
+    },
     "smartLogging": {
       "noAppointments": "אין פגישות מתוכננות להיום.",
-      "noActiveSessions": "אין פגישות פעילות כרגע. ניתן לרשום פגישות מתוכננות משעה לפני תחילת הפגישה ועד סיום הפגישה. אם הגעת למוסד בלי פגישה, עבור למסך נוכחות כדי לרשום הגעה למוסד.",
+      "noActiveSessions": "אין פגישות פעילות כרגע.",
       "alreadyLogged": "כל הפגישות התקפות להיום כבר נרשמו.",
       "success": "נרשמו בהצלחה {{count}} פגישה{{statusText}}!",
       "success_other": "נרשמו בהצלחה {{count}} פגישות{{statusText}}!",

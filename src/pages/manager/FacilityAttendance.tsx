@@ -70,6 +70,17 @@ const diffMinutes = (startTs: any, endTs: any) => {
 };
 
 const getTodayStr = () => new Date().toISOString().split("T")[0];
+const getRecordDate = (r: FacilityAttendanceRecord) => {
+  if (r.date) return r.date;
+  try {
+    const ts = r.confirmedAt || r.visitStartedAt || null;
+    if (!ts) return "";
+    const d = typeof (ts as any).toDate === "function" ? (ts as any).toDate() : new Date(ts as any);
+    return d.toISOString().split("T")[0];
+  } catch {
+    return "";
+  }
+};
 
 export default function FacilityAttendance() {
   const navigate = useNavigate();
@@ -80,7 +91,8 @@ export default function FacilityAttendance() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(window.innerWidth < MOBILE_BREAKPOINT);
 
-  const [mode, setMode] = useState<ViewMode>("active");
+  // Default to "By date" so managers can immediately see both check-ins and check-outs for today.
+  const [mode, setMode] = useState<ViewMode>("date");
   const [selectedDate, setSelectedDate] = useState(getTodayStr());
   const [search, setSearch] = useState("");
 
@@ -148,7 +160,7 @@ export default function FacilityAttendance() {
     const filteredByMode = records.filter((r) => {
       const isActive = !r.visitEndedAt;
       if (mode === "active") return isActive;
-      return (r.date || "") === selectedDate;
+      return getRecordDate(r) === selectedDate;
     });
 
     // Sort newest first (confirmedAt desc) to mimic the previous query orderBy
