@@ -1126,6 +1126,17 @@ const Attendance = () => {
   const volunteer = todayVolunteer || historyVolunteer;
 
   const getTodayStr = () => new Date().toISOString().split('T')[0];
+  const getRecordDate = (record) => {
+    if (record?.date) return record.date;
+    try {
+      const ts = record?.visitStartedAt || record?.confirmedAt;
+      if (!ts) return '';
+      const d = typeof ts?.toDate === 'function' ? ts.toDate() : new Date(ts);
+      return d.toISOString().split('T')[0];
+    } catch {
+      return '';
+    }
+  };
 
   const formatTimeFromTimestamp = (ts) => {
     try {
@@ -1189,17 +1200,19 @@ const Attendance = () => {
 
       try {
         const todayStr = getTodayStr();
+        // Keep query index-light: single filter + orderBy, then filter client-side.
         const q = query(
           attendanceRef,
           where('volunteerId.id', '==', volunteer.id),
-          where('attendanceType', '==', 'facility'),
-          where('date', '==', todayStr),
           orderBy('confirmedAt', 'desc'),
-          limit(5)
+          limit(100)
         );
 
         const snap = await getDocs(q);
-        const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const records = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(r => r.attendanceType === 'facility' && getRecordDate(r) === todayStr);
+
         const activeRecord = records.find(r => !r.visitEndedAt);
 
         setFacilityAttendance({
@@ -1285,19 +1298,37 @@ const Attendance = () => {
       return;
     }
 
-    if (!facilityAttendance.record?.id) {
-      toast({
-        title: t('attendance.notifications.facilityNotCheckedIn'),
-        variant: "destructive"
-      });
-      return;
-    }
-
     setFacilityAttendance(prev => ({ ...prev, loading: true }));
 
     try {
       const now = Timestamp.now();
-      const ref = doc(attendanceRef, facilityAttendance.record.id);
+      let recordId = facilityAttendance.record?.id;
+
+      // If local state is stale/missing (multi-device), find the active facility record and close it.
+      if (!recordId) {
+        const todayStr = getTodayStr();
+        const q = query(
+          attendanceRef,
+          where('volunteerId.id', '==', volunteer.id),
+          orderBy('confirmedAt', 'desc'),
+          limit(200)
+        );
+        const snap = await getDocs(q);
+        const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const activeRecord = records.find(r => r.attendanceType === 'facility' && getRecordDate(r) === todayStr && !r.visitEndedAt);
+        recordId = activeRecord?.id;
+      }
+
+      if (!recordId) {
+        toast({
+          title: t('attendance.notifications.facilityNotCheckedIn'),
+          variant: "destructive"
+        });
+        setFacilityAttendance(prev => ({ ...prev, loading: false }));
+        return;
+      }
+
+      const ref = doc(attendanceRef, recordId);
       await updateDoc(ref, {
         visitEndedAt: now,
         notes: `Facility check-out by volunteer at ${new Date().toLocaleTimeString()}`

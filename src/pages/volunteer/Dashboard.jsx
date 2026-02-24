@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Clock, TrendingUp, Award, Calendar, CheckCircle2, AlertCircle, ChevronRight, ChevronLeft, CalendarDays, Users, Activity, FileText, Star, Target, ArrowUpRight, ArrowDownRight, Hand, UserCheck, HeartHandshake, ThumbsUp, ShieldCheck, Globe, Zap, TrendingDown } from 'lucide-react';
-import { doc, getDoc, collection, query, where, getDocs, limit, addDoc, updateDoc, Timestamp, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, getDocs, limit, addDoc, updateDoc, Timestamp, onSnapshot, orderBy } from "firebase/firestore";
 import { useTranslation } from 'react-i18next';
 import { db } from '@/lib/firebase';
 import { Layout } from '@/components/volunteer/Layout';
@@ -355,8 +355,14 @@ const Dashboard = () => {
 
     setFacilityAttendance(prev => ({ ...prev, loading: true }));
     const attendanceCol = collection(db, 'attendance');
-    // Keep query simple to avoid composite-index requirements. Filter/sort client-side.
-    const q = query(attendanceCol, where('volunteerId.id', '==', volunteer.id), limit(500));
+    // Single where + orderBy uses default single-field indexes.
+    // Important: orderBy ensures the most recent records are included (avoid missing active doc due to limit).
+    const q = query(
+      attendanceCol,
+      where('volunteerId.id', '==', volunteer.id),
+      orderBy('confirmedAt', 'desc'),
+      limit(100)
+    );
 
     const unsubscribe = onSnapshot(
       q,
@@ -370,11 +376,8 @@ const Dashboard = () => {
             if (!startedMs) return true;
             return (nowMs() - startedMs) <= 24 * 60 * 60 * 1000;
           })
-          .sort((a, b) => {
-            const aMs = toMillisSafe(a.visitStartedAt || a.confirmedAt) || 0;
-            const bMs = toMillisSafe(b.visitStartedAt || b.confirmedAt) || 0;
-            return bMs - aMs;
-          })[0];
+          // already ordered by confirmedAt desc, but keep deterministic fallback
+          .sort((a, b) => (toMillisSafe(b.visitStartedAt || b.confirmedAt) || 0) - (toMillisSafe(a.visitStartedAt || a.confirmedAt) || 0))[0];
 
         setFacilityAttendance({
           loading: false,
@@ -577,6 +580,7 @@ const Dashboard = () => {
       const recentByVolunteer = query(
         attendanceCol,
         where('volunteerId.id', '==', volunteer.id),
+        orderBy('confirmedAt', 'desc'),
         limit(200)
       );
 
