@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Clock, TrendingUp, Award, Calendar, CheckCircle2, AlertCircle, ChevronRight, ChevronLeft, CalendarDays, Users, Activity, FileText, Star, Target, ArrowUpRight, ArrowDownRight, Hand, UserCheck, HeartHandshake, ThumbsUp, ShieldCheck, Globe, Zap, TrendingDown } from 'lucide-react';
-import { doc, getDoc, collection, query, where, getDocs, orderBy, limit, addDoc, updateDoc, Timestamp } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, getDocs, limit, addDoc, updateDoc, Timestamp, onSnapshot } from "firebase/firestore";
 import { useTranslation } from 'react-i18next';
 import { db } from '@/lib/firebase';
 import { Layout } from '@/components/volunteer/Layout';
@@ -317,6 +317,17 @@ const Dashboard = () => {
   };
 
   const getTodayStr = () => new Date().toISOString().split('T')[0];
+  const nowMs = () => Date.now();
+  const toMillisSafe = (ts) => {
+    try {
+      if (!ts) return null;
+      if (typeof ts.toMillis === 'function') return ts.toMillis();
+      const d = typeof ts.toDate === 'function' ? ts.toDate() : new Date(ts);
+      return d.getTime();
+    } catch {
+      return null;
+    }
+  };
 
   const chunkArray = (arr, size) => {
     const chunks = [];
@@ -326,36 +337,48 @@ const Dashboard = () => {
     return chunks;
   };
 
-  const fetchFacilityAttendance = async () => {
+  // Realtime facility attendance subscription so check-in/out from other devices reflects immediately.
+  useEffect(() => {
     if (!volunteer?.id) return;
+
     setFacilityAttendance(prev => ({ ...prev, loading: true }));
+    const attendanceCol = collection(db, 'attendance');
+    // Keep query simple to avoid composite-index requirements. Filter/sort client-side.
+    const q = query(attendanceCol, where('volunteerId.id', '==', volunteer.id), limit(500));
 
-    try {
-      const todayStr = getTodayStr();
-      const attendanceCol = collection(db, 'attendance');
-      const q = query(
-        attendanceCol,
-        where('volunteerId.id', '==', volunteer.id),
-        where('attendanceType', '==', 'facility'),
-        where('date', '==', todayStr),
-        orderBy('confirmedAt', 'desc'),
-        limit(5)
-      );
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        const activeFacility = docs
+          .filter(r => r.attendanceType === 'facility' && !r.visitEndedAt)
+          // ignore very old dangling check-ins (e.g. if someone forgot to check out days ago)
+          .filter(r => {
+            const startedMs = toMillisSafe(r.visitStartedAt || r.confirmedAt);
+            if (!startedMs) return true;
+            return (nowMs() - startedMs) <= 24 * 60 * 60 * 1000;
+          })
+          .sort((a, b) => {
+            const aMs = toMillisSafe(a.visitStartedAt || a.confirmedAt) || 0;
+            const bMs = toMillisSafe(b.visitStartedAt || b.confirmedAt) || 0;
+            return bMs - aMs;
+          })[0];
 
-      const snap = await getDocs(q);
-      const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const activeRecord = records.find(r => !r.visitEndedAt);
+        setFacilityAttendance({
+          loading: false,
+          record: activeFacility || null,
+          checkedIn: Boolean(activeFacility)
+        });
+      },
+      (error) => {
+        console.error('Error subscribing to facility attendance:', error);
+        setFacilityAttendance(prev => ({ ...prev, loading: false }));
+      }
+    );
 
-      setFacilityAttendance({
-        loading: false,
-        record: activeRecord || null,
-        checkedIn: Boolean(activeRecord)
-      });
-    } catch (error) {
-      console.error('Error fetching facility attendance:', error);
-      setFacilityAttendance(prev => ({ ...prev, loading: false }));
-    }
-  };
+    return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [volunteer?.id]);
 
   const fetchTodayAppointmentAttendance = async () => {
     if (!volunteer?.id) return;
@@ -408,7 +431,6 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (!volunteer?.id) return;
-    fetchFacilityAttendance();
     fetchTodayAppointmentAttendance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [volunteer?.id]);
@@ -549,7 +571,7 @@ const Dashboard = () => {
       const snap = await getDocs(recentByVolunteer);
       const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const activeFacilityRecords = records
-        .filter(r => r.attendanceType === 'facility' && r.date === todayStr && !r.visitEndedAt);
+        .filter(r => r.attendanceType === 'facility' && !r.visitEndedAt);
 
       // Pick the most recent by confirmedAt
       const activeRecord = activeFacilityRecords.sort((a, b) => {
@@ -572,7 +594,6 @@ const Dashboard = () => {
         });
 
         showNotification(t('dashboard.smartCta.checkOutSuccess'), 'success');
-        await fetchFacilityAttendance();
         await fetchTodayAppointmentAttendance();
         return;
       }
@@ -603,7 +624,6 @@ const Dashboard = () => {
 
       await addDoc(attendanceCol, attendanceData);
       showNotification(t('dashboard.smartCta.checkOutSuccess'), 'success');
-      await fetchFacilityAttendance();
       await fetchTodayAppointmentAttendance();
     } catch (error) {
       console.error('Error creating checkout record:', error);
