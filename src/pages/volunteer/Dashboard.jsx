@@ -125,6 +125,18 @@ const Dashboard = () => {
   });
   const langToggleRef = useRef(null);
 
+  const getStoredAuth = () => {
+    try {
+      const raw = localStorage.getItem("user") || sessionStorage.getItem("user") || "{}";
+      const u = JSON.parse(raw);
+      const userId = u?.id || u?.uid || null;
+      const username = u?.username || null;
+      return { userId, username };
+    } catch {
+      return { userId: null, username: null };
+    }
+  };
+
   // Check authentication
   useEffect(() => {
     try {
@@ -729,9 +741,7 @@ const Dashboard = () => {
   // Fetch volunteer data
   const fetchVolunteerData = async () => {
     try {
-      // Get user ID from localStorage
-      const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
-      const username = localStorage.getItem('username') || sessionStorage.getItem('username');
+      const { userId, username } = getStoredAuth();
 
       if (!userId) {
         setDataLoaded(prev => ({ ...prev, volunteerData: true }));
@@ -789,8 +799,7 @@ const Dashboard = () => {
   // Fetch upcoming sessions from calendar_slots with proper time validation
   const fetchUpcomingSessions = async () => {
     try {
-      const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
-      const username = localStorage.getItem('username') || sessionStorage.getItem('username');
+      const { userId, username } = getStoredAuth();
       if (!userId) {
         setDataLoaded(prev => ({ ...prev, upcomingSessions: true }));
         return;
@@ -803,8 +812,8 @@ const Dashboard = () => {
       const volunteer = volunteerSnapshot.docs
         .map(doc => ({ id: doc.id, ...doc.data() }))
         .find(v => v.userId === userId) || volunteerSnapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() }))
-        .find(v => v.userId === username);
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .find(v => v.userId === username);
 
       if (!volunteer || !volunteer.appointmentHistory) {
         setUpcomingSessions([]);
@@ -916,8 +925,7 @@ const Dashboard = () => {
   // Fetch recent activity from attendance collection
   const fetchRecentActivity = async () => {
     try {
-      const userId = localStorage.getItem('userId');
-      if (!userId) {
+      if (!userData.volunteerId) {
         setDataLoaded(prev => ({ ...prev, recentActivity: true }));
         return;
       }
