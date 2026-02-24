@@ -730,8 +730,8 @@ const Dashboard = () => {
   const fetchVolunteerData = async () => {
     try {
       // Get user ID from localStorage
-      const userId = localStorage.getItem('userId');
-      const username = localStorage.getItem('username');
+      const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+      const username = localStorage.getItem('username') || sessionStorage.getItem('username');
 
       if (!userId) {
         setDataLoaded(prev => ({ ...prev, volunteerData: true }));
@@ -740,11 +740,21 @@ const Dashboard = () => {
 
       // Get volunteer document by userId
       const volunteersRef = collection(db, "volunteers");
-      const q = query(volunteersRef, where("userId", "==", userId));
+      const candidateIds = Array.from(new Set([userId, username].filter(Boolean)));
+      const q = candidateIds.length > 1
+        ? query(volunteersRef, where("userId", "in", candidateIds))
+        : query(volunteersRef, where("userId", "==", candidateIds[0]));
       const volunteerSnapshot = await getDocs(q);
 
       if (!volunteerSnapshot.empty) {
-        const volunteerDoc = volunteerSnapshot.docs[0];
+        const docs = volunteerSnapshot.docs;
+        const preferred =
+          docs.find(d => {
+            const data = d.data();
+            return data && data.userId === userId;
+          }) ||
+          docs[0];
+        const volunteerDoc = preferred;
         const volunteerData = volunteerDoc.data();
 
         // Store the complete volunteer object for smart logging
@@ -779,7 +789,8 @@ const Dashboard = () => {
   // Fetch upcoming sessions from calendar_slots with proper time validation
   const fetchUpcomingSessions = async () => {
     try {
-      const userId = localStorage.getItem('userId');
+      const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+      const username = localStorage.getItem('username') || sessionStorage.getItem('username');
       if (!userId) {
         setDataLoaded(prev => ({ ...prev, upcomingSessions: true }));
         return;
@@ -791,7 +802,9 @@ const Dashboard = () => {
 
       const volunteer = volunteerSnapshot.docs
         .map(doc => ({ id: doc.id, ...doc.data() }))
-        .find(v => v.userId === userId);
+        .find(v => v.userId === userId) || volunteerSnapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .find(v => v.userId === username);
 
       if (!volunteer || !volunteer.appointmentHistory) {
         setUpcomingSessions([]);

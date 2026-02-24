@@ -241,9 +241,10 @@ const usePastSessions = (username, userId) => {
         // Get volunteer data
         const volunteersRef = collection(db, "volunteers");
         const volunteerSnapshot = await getDocs(volunteersRef);
-        const volunteer = volunteerSnapshot.docs
-          .map(doc => ({ id: doc.id, ...doc.data() }))
-          .find(v => v.userId === userId);
+        const allVolunteers = volunteerSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const volunteer =
+          allVolunteers.find(v => v.userId === userId) ||
+          allVolunteers.find(v => v.userId === username);
 
         if (!volunteer || !volunteer.appointmentHistory) {
           setPastSessions([]);
@@ -336,9 +337,10 @@ const useTodaySessions = (username, userId) => {
 
         // Get volunteer's appointmentHistory
         const volunteerSnapshot = await getDocs(volunteersRef);
-        const volunteer = volunteerSnapshot.docs
-          .map(doc => docToObject(doc))
-          .find(v => v.userId === userId || v.userId === username);
+        const allVolunteers = volunteerSnapshot.docs.map(doc => docToObject(doc));
+        const volunteer =
+          allVolunteers.find(v => v.userId === userId) ||
+          allVolunteers.find(v => v.userId === username);
 
         if (!volunteer || !volunteer.appointmentHistory) {
           setTodaySessions([]);
@@ -627,9 +629,10 @@ const useAttendanceHistory = (username, userId) => {
     try {
       // Get volunteer info first
       const volunteerSnapshot = await getDocs(volunteersRef);
-      const volunteer = volunteerSnapshot.docs
-        .map(doc => docToObject(doc))
-        .find(v => v.userId === userId || v.userId === username);
+      const allVolunteers = volunteerSnapshot.docs.map(doc => docToObject(doc));
+      const volunteer =
+        allVolunteers.find(v => v.userId === userId) ||
+        allVolunteers.find(v => v.userId === username);
 
       if (!volunteer) {
         setVolunteer(null);
