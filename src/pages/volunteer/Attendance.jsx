@@ -27,6 +27,38 @@ import {
 // Constants
 const RECORDS_PER_PAGE = 5;
 
+const toMillisSafe = (ts) => {
+  try {
+    if (!ts) return 0;
+    if (typeof ts.toMillis === 'function') return ts.toMillis();
+    const d = typeof ts.toDate === 'function' ? ts.toDate() : new Date(ts);
+    return d.getTime();
+  } catch {
+    return 0;
+  }
+};
+
+const pickVolunteerDeterministically = (allVolunteers, userId, username) => {
+  if (!Array.isArray(allVolunteers) || allVolunteers.length === 0) return null;
+  const primary = allVolunteers.filter(v => v?.userId === userId);
+  const secondary = !primary.length && username ? allVolunteers.filter(v => v?.userId === username) : [];
+  const candidates = primary.length ? primary : secondary;
+  if (!candidates.length) return null;
+
+  return candidates
+    .slice()
+    .sort((a, b) => {
+      const aMs = toMillisSafe(a?.createdAt);
+      const bMs = toMillisSafe(b?.createdAt);
+      if (bMs !== aMs) return bMs - aMs;
+      // stable tie-breaker
+      const aId = String(a?.id || '');
+      const bId = String(b?.id || '');
+      if (aId === bId) return 0;
+      return bId > aId ? 1 : -1;
+    })[0];
+};
+
 // Helper Functions
 const parseTimeString = (timeStr) => {
   if (!timeStr) return new Date(0); // Return epoch for null/undefined times
@@ -242,9 +274,7 @@ const usePastSessions = (username, userId) => {
         const volunteersRef = collection(db, "volunteers");
         const volunteerSnapshot = await getDocs(volunteersRef);
         const allVolunteers = volunteerSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const volunteer =
-          allVolunteers.find(v => v.userId === userId) ||
-          allVolunteers.find(v => v.userId === username);
+        const volunteer = pickVolunteerDeterministically(allVolunteers, userId, username);
 
         if (!volunteer || !volunteer.appointmentHistory) {
           setPastSessions([]);
@@ -338,9 +368,7 @@ const useTodaySessions = (username, userId) => {
         // Get volunteer's appointmentHistory
         const volunteerSnapshot = await getDocs(volunteersRef);
         const allVolunteers = volunteerSnapshot.docs.map(doc => docToObject(doc));
-        const volunteer =
-          allVolunteers.find(v => v.userId === userId) ||
-          allVolunteers.find(v => v.userId === username);
+        const volunteer = pickVolunteerDeterministically(allVolunteers, userId, username);
 
         if (!volunteer || !volunteer.appointmentHistory) {
           setTodaySessions([]);
@@ -630,9 +658,7 @@ const useAttendanceHistory = (username, userId) => {
       // Get volunteer info first
       const volunteerSnapshot = await getDocs(volunteersRef);
       const allVolunteers = volunteerSnapshot.docs.map(doc => docToObject(doc));
-      const volunteer =
-        allVolunteers.find(v => v.userId === userId) ||
-        allVolunteers.find(v => v.userId === username);
+      const volunteer = pickVolunteerDeterministically(allVolunteers, userId, username);
 
       if (!volunteer) {
         setVolunteer(null);

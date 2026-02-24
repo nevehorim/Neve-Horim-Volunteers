@@ -762,13 +762,24 @@ const Dashboard = () => {
 
       if (!volunteerSnapshot.empty) {
         const docs = volunteerSnapshot.docs;
-        const preferred =
-          docs.find(d => {
-            const data = d.data();
-            return data && data.userId === userId;
-          }) ||
-          docs[0];
-        const volunteerDoc = preferred;
+        const matchingUserId = docs.filter(d => {
+          const data = d.data();
+          return data && data.userId === userId;
+        });
+        const candidates = matchingUserId.length ? matchingUserId : docs;
+        const volunteerDoc = candidates
+          .slice()
+          .sort((a, b) => {
+            const aData = a.data();
+            const bData = b.data();
+            const aMs = toMillisSafe(aData?.createdAt);
+            const bMs = toMillisSafe(bData?.createdAt);
+            if (bMs !== aMs) return bMs - aMs;
+            const aId = String(a.id || '');
+            const bId = String(b.id || '');
+            if (aId === bId) return 0;
+            return bId > aId ? 1 : -1;
+          })[0];
         const volunteerData = volunteerDoc.data();
 
         // Store the complete volunteer object for smart logging
@@ -809,15 +820,34 @@ const Dashboard = () => {
         return;
       }
 
-      // Fetch volunteer data to get appointmentHistory
+      // Fetch volunteer data to get appointmentHistory (avoid scanning all volunteers)
       const volunteersRef = collection(db, "volunteers");
-      const volunteerSnapshot = await getDocs(volunteersRef);
+      const candidateIds = Array.from(new Set([userId, username].filter(Boolean)));
+      const q = candidateIds.length > 1
+        ? query(volunteersRef, where("userId", "in", candidateIds))
+        : query(volunteersRef, where("userId", "==", candidateIds[0]));
+      const volunteerSnapshot = await getDocs(q);
 
-      const volunteer = volunteerSnapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() }))
-        .find(v => v.userId === userId) || volunteerSnapshot.docs
-          .map(doc => ({ id: doc.id, ...doc.data() }))
-          .find(v => v.userId === username);
+      const docs = volunteerSnapshot.docs;
+      const matchingUserId = docs.filter(d => {
+        const data = d.data();
+        return data && data.userId === userId;
+      });
+      const candidates = matchingUserId.length ? matchingUserId : docs;
+      const pickedDoc = candidates
+        .slice()
+        .sort((a, b) => {
+          const aData = a.data();
+          const bData = b.data();
+          const aMs = toMillisSafe(aData?.createdAt);
+          const bMs = toMillisSafe(bData?.createdAt);
+          if (bMs !== aMs) return bMs - aMs;
+          const aId = String(a.id || '');
+          const bId = String(b.id || '');
+          if (aId === bId) return 0;
+          return bId > aId ? 1 : -1;
+        })[0];
+      const volunteer = pickedDoc ? ({ id: pickedDoc.id, ...pickedDoc.data() }) : null;
 
       if (!volunteer || !volunteer.appointmentHistory) {
         setUpcomingSessions([]);
