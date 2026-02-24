@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
   collection, getDocs, query, where, orderBy, limit, doc,
-  updateDoc, addDoc, Timestamp
+  updateDoc, addDoc, setDoc, Timestamp
 } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -1299,6 +1299,24 @@ const Attendance = () => {
         checkedIn: true
       });
 
+      // Update current facility presence (cross-device, keyed by auth userId)
+      if (userId) {
+        const presenceRef = doc(db, 'facility_presence', userId);
+        await setDoc(
+          presenceRef,
+          {
+            userId,
+            volunteerDocId: volunteer.id,
+            attendanceId: docRef.id,
+            status: 'in',
+            startedAt: now,
+            endedAt: null,
+            updatedAt: now
+          },
+          { merge: true }
+        );
+      }
+
       toast({
         title: t('attendance.notifications.facilityCheckInSuccess'),
         variant: "default"
@@ -1365,6 +1383,23 @@ const Attendance = () => {
         record: null,
         checkedIn: false
       });
+
+      // Update current facility presence (cross-device, keyed by auth userId)
+      if (userId) {
+        const presenceRef = doc(db, 'facility_presence', userId);
+        await setDoc(
+          presenceRef,
+          {
+            userId,
+            volunteerDocId: volunteer.id,
+            attendanceId: null,
+            status: 'out',
+            endedAt: now,
+            updatedAt: now
+          },
+          { merge: true }
+        );
+      }
 
       toast({
         title: t('attendance.notifications.facilityCheckOutSuccess'),

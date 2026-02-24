@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Clock, TrendingUp, Award, Calendar, CheckCircle2, AlertCircle, ChevronRight, ChevronLeft, CalendarDays, Users, Activity, FileText, Star, Target, ArrowUpRight, ArrowDownRight, Hand, UserCheck, HeartHandshake, ThumbsUp, ShieldCheck, Globe, Zap, TrendingDown } from 'lucide-react';
-import { doc, getDoc, collection, query, where, getDocs, limit, addDoc, updateDoc, Timestamp, onSnapshot, orderBy } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, getDocs, limit, addDoc, updateDoc, setDoc, Timestamp, onSnapshot, orderBy } from "firebase/firestore";
 import { useTranslation } from 'react-i18next';
 import { db } from '@/lib/firebase';
 import { Layout } from '@/components/volunteer/Layout';
@@ -112,6 +112,7 @@ const Dashboard = () => {
   const [recentActivity, setRecentActivity] = useState([]);
   const [volunteer, setVolunteer] = useState(null);
   const [isLoggingSession, setIsLoggingSession] = useState(false);
+  const [authUserId, setAuthUserId] = useState(null);
   const [facilityAttendance, setFacilityAttendance] = useState({
     loading: false,
     record: null,
@@ -146,6 +147,7 @@ const Dashboard = () => {
       } else if (user.role !== "volunteer") {
         window.location.href = "/manager";
       }
+      setAuthUserId(user.id || user.uid || null);
     } catch (error) {
       console.error("Auth check error:", error);
       window.location.href = "/login";
@@ -349,51 +351,37 @@ const Dashboard = () => {
     return chunks;
   };
 
-  // Realtime facility attendance subscription so check-in/out from other devices reflects immediately.
+  // Realtime facility presence subscription (cross-device, stable key: auth userId)
   useEffect(() => {
-    if (!volunteer?.id) return;
+    if (!authUserId) return;
 
     setFacilityAttendance(prev => ({ ...prev, loading: true }));
-    const attendanceCol = collection(db, 'attendance');
-    // Single where + orderBy uses default single-field indexes.
-    // Important: orderBy ensures the most recent records are included (avoid missing active doc due to limit).
-    const q = query(
-      attendanceCol,
-      where('volunteerId.id', '==', volunteer.id),
-      orderBy('confirmedAt', 'desc'),
-      limit(100)
-    );
+    const presenceRef = doc(db, 'facility_presence', authUserId);
 
     const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        const activeFacility = docs
-          .filter(r => r.attendanceType === 'facility' && !r.visitEndedAt)
-          // ignore very old dangling check-ins (e.g. if someone forgot to check out days ago)
-          .filter(r => {
-            const startedMs = toMillisSafe(r.visitStartedAt || r.confirmedAt);
-            if (!startedMs) return true;
-            return (nowMs() - startedMs) <= 24 * 60 * 60 * 1000;
-          })
-          // already ordered by confirmedAt desc, but keep deterministic fallback
-          .sort((a, b) => (toMillisSafe(b.visitStartedAt || b.confirmedAt) || 0) - (toMillisSafe(a.visitStartedAt || a.confirmedAt) || 0))[0];
+      presenceRef,
+      (snap) => {
+        const data = snap.data();
+        const isIn = data?.status === 'in';
+        const startedAt = data?.startedAt || null;
+        const attendanceId = data?.attendanceId || null;
 
         setFacilityAttendance({
           loading: false,
-          record: activeFacility || null,
-          checkedIn: Boolean(activeFacility)
+          checkedIn: Boolean(isIn),
+          record: isIn
+            ? { id: attendanceId, visitStartedAt: startedAt, confirmedAt: startedAt }
+            : null
         });
       },
       (error) => {
-        console.error('Error subscribing to facility attendance:', error);
+        console.error('Error subscribing to facility presence:', error);
         setFacilityAttendance(prev => ({ ...prev, loading: false }));
       }
     );
 
     return () => unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [volunteer?.id]);
+  }, [authUserId]);
 
   const fetchTodayAppointmentAttendance = async () => {
     if (!volunteer?.id) return;
@@ -500,6 +488,23 @@ const Dashboard = () => {
         checkedIn: true
       });
 
+      if (authUserId) {
+        const presenceRef = doc(db, 'facility_presence', authUserId);
+        await setDoc(
+          presenceRef,
+          {
+            userId: authUserId,
+            volunteerDocId: volunteer.id,
+            attendanceId: docRef.id,
+            status: 'in',
+            startedAt: now,
+            endedAt: null,
+            updatedAt: now
+          },
+          { merge: true }
+        );
+      }
+
       showNotification(t('dashboard.smartCta.checkInSuccess'), 'success');
     } catch (error) {
       console.error('Error checking in (facility):', error);
@@ -514,26 +519,40 @@ const Dashboard = () => {
       return;
     }
 
-    if (!facilityAttendance.record?.id) {
-      showNotification(t('dashboard.smartCta.notCheckedIn'), 'warning');
-      return;
-    }
-
     setFacilityAttendance(prev => ({ ...prev, loading: true }));
     try {
       const now = Timestamp.now();
       const attendanceCol = collection(db, 'attendance');
-      const ref = doc(attendanceCol, facilityAttendance.record.id);
-      await updateDoc(ref, {
-        visitEndedAt: now,
-        notes: `Facility check-out by volunteer at ${new Date().toLocaleTimeString()}`
-      });
+      const recordId = facilityAttendance.record?.id;
+      if (recordId) {
+        const ref = doc(attendanceCol, recordId);
+        await updateDoc(ref, {
+          visitEndedAt: now,
+          notes: `Facility check-out by volunteer at ${new Date().toLocaleTimeString()}`
+        });
+      }
 
       setFacilityAttendance({
         loading: false,
         record: null,
         checkedIn: false
       });
+
+      if (authUserId) {
+        const presenceRef = doc(db, 'facility_presence', authUserId);
+        await setDoc(
+          presenceRef,
+          {
+            userId: authUserId,
+            volunteerDocId: volunteer.id,
+            attendanceId: null,
+            status: 'out',
+            endedAt: now,
+            updatedAt: now
+          },
+          { merge: true }
+        );
+      }
 
       showNotification(t('dashboard.smartCta.checkOutSuccess'), 'success');
     } catch (error) {
