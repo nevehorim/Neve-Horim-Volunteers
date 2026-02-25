@@ -18,6 +18,7 @@ import ManagerSidebar from "@/components/manager/ManagerSidebar";
 import { cn } from "@/lib/utils";
 
 import { getDocs, query, Timestamp, where, writeBatch } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { volunteersRef } from "@/services/firestore";
 import { ensureDefaultGroup, GroupUI, useAddGroup, useDeleteGroup, useGroups, useUpdateGroup } from "@/hooks/useFirestoreGroups";
 
