@@ -32,13 +32,6 @@
     "deleteTitle": "מחיקת קבוצה",
     "deleteDescription": "האם למחוק קבוצה זו? מומלץ להעביר מתנדבים משויכים לפני המחיקה."
   },
-  "migrate": {
-    "button": "המר השתייכויות ישנות",
-    "confirm": "הפעולה תיצור קבוצות מתוך ערכי groupAffiliation טקסטואליים קיימים ותעדכן מתנדבים למזהה קבוצה. להמשיך?",
-    "doneTitle": "ההמרה הושלמה",
-    "doneDescription": "נוצרו {{createdGroups}} קבוצות ועודכנו {{updatedVolunteers}} מתנדבים.",
-    "error": "ההמרה נכשלה. בדוק את הקונסול ונסה שוב."
-  },
   "toasts": {
     "createSuccess": "קבוצה נוצרה",
     "createError": "יצירת הקבוצה נכשלה",

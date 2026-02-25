@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useLanguage } from "@/contexts/LanguageContext";
 
-import { Menu, Users, Search, Plus, Pencil, Trash2, Shield } from "lucide-react";
+import { Menu, Users, Search, Plus, Pencil, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,9 +17,7 @@ import { useToast } from "@/components/ui/use-toast";
 import ManagerSidebar from "@/components/manager/ManagerSidebar";
 import { cn } from "@/lib/utils";
 
-import { Timestamp, addDoc, getDocs, writeBatch } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { groupsRef, volunteersRef } from "@/services/firestore";
+import { Timestamp } from "firebase/firestore";
 import { ensureDefaultGroup, GroupUI, useAddGroup, useDeleteGroup, useGroups, useUpdateGroup } from "@/hooks/useFirestoreGroups";
 
 const MOBILE_BREAKPOINT = 1024;
@@ -124,95 +122,6 @@ export default function Groups() {
     toast({ title: t("toasts.deleteSuccess") });
   };
 
-  const handleMigrateLegacy = async () => {
-    const ok = window.confirm(t("migrate.confirm"));
-    if (!ok) return;
-
-    try {
-      const defaultGroup = await ensureDefaultGroup();
-      const groupsSnap = await getDocs(groupsRef);
-      const groupDocs = groupsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
-
-      const byId = new Map<string, any>();
-      const byNameLower = new Map<string, any>();
-      groupDocs.forEach((g) => {
-        byId.set(g.id, g);
-        byNameLower.set(String(g.name || "").trim().toLowerCase(), g);
-      });
-      byId.set(defaultGroup.id, defaultGroup);
-      byNameLower.set(defaultGroup.name.trim().toLowerCase(), defaultGroup);
-
-      const volunteersSnap = await getDocs(volunteersRef);
-      let batch = writeBatch(db);
-      let writes = 0;
-      let createdGroups = 0;
-      let updatedVolunteers = 0;
-      const commitBatches: Promise<void>[] = [];
-
-      for (const vDoc of volunteersSnap.docs) {
-        const v = vDoc.data() as any;
-        const raw = (v.groupAffiliation ?? "").toString().trim();
-
-        // Normalize empty -> default group
-        if (!raw) {
-          if (v.groupAffiliation !== defaultGroup.id) {
-            batch.update(vDoc.ref, { groupAffiliation: defaultGroup.id });
-            writes++;
-            updatedVolunteers++;
-          }
-          continue;
-        }
-
-        // Already a group id?
-        if (byId.has(raw)) continue;
-
-        // Match by name
-        const key = raw.toLowerCase();
-        let group = byNameLower.get(key);
-
-        // Create group if it doesn't exist
-        if (!group) {
-          const now = Timestamp.now();
-          const docRef = await addDoc(groupsRef, {
-            name: raw,
-            isDefault: false,
-            createdAt: now,
-            updatedAt: now,
-          });
-          group = { id: docRef.id, name: raw, isDefault: false, createdAt: now, updatedAt: now };
-          byId.set(group.id, group);
-          byNameLower.set(key, group);
-          createdGroups++;
-        }
-
-        batch.update(vDoc.ref, { groupAffiliation: group.id });
-        writes++;
-        updatedVolunteers++;
-
-        // Commit in chunks (Firestore limit is 500 writes per batch)
-        if (writes >= 450) {
-          commitBatches.push(batch.commit());
-          batch = writeBatch(db);
-          writes = 0;
-        }
-      }
-
-      // final commit
-      if (writes > 0) {
-        commitBatches.push(batch.commit());
-      }
-      await Promise.all(commitBatches);
-
-      toast({
-        title: t("migrate.doneTitle"),
-        description: t("migrate.doneDescription", { createdGroups, updatedVolunteers }),
-      });
-    } catch (e) {
-      console.error("Migration failed:", e);
-      toast({ title: t("migrate.error"), variant: "destructive" });
-    }
-  };
-
   return (
     <div className={cn("flex min-h-screen bg-slate-50", isRTL && "rtl")}>
       <ManagerSidebar
@@ -239,10 +148,6 @@ export default function Groups() {
             </div>
           </div>
           <div className={cn("flex items-center gap-2", isRTL && "flex-row-reverse")}>
-            <Button variant="secondary" onClick={handleMigrateLegacy}>
-              <Shield className="h-4 w-4 mr-2" />
-              {t("migrate.button")}
-            </Button>
             <Button onClick={() => setIsCreateOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />
               {t("actions.create")}

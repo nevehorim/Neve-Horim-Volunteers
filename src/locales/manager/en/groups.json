@@ -32,13 +32,6 @@
     "deleteTitle": "Delete group",
     "deleteDescription": "Are you sure you want to delete this group? Volunteers assigned to it should be migrated first."
   },
-  "migrate": {
-    "button": "Migrate legacy affiliations",
-    "confirm": "This will convert existing volunteers with text groupAffiliation into groups and set their groupAffiliation to a group ID. Continue?",
-    "doneTitle": "Migration complete",
-    "doneDescription": "Created {{createdGroups}} group(s) and updated {{updatedVolunteers}} volunteer(s).",
-    "error": "Migration failed. Please check the console and try again."
-  },
   "toasts": {
     "createSuccess": "Group created",
     "createError": "Failed to create group",
