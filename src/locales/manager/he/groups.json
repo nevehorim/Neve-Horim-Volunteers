@@ -30,7 +30,7 @@
     "editTitle": "עריכת קבוצה",
     "editDescription": "עדכן את שם הקבוצה.",
     "deleteTitle": "מחיקת קבוצה",
-    "deleteDescription": "האם למחוק קבוצה זו? מומלץ להעביר מתנדבים משויכים לפני המחיקה."
+    "deleteDescription": "האם למחוק קבוצה זו? מתנדבים משויכים יעברו לקבוצת ברירת המחדל."
   },
   "toasts": {
     "createSuccess": "קבוצה נוצרה",
@@ -38,7 +38,8 @@
     "updateSuccess": "הקבוצה עודכנה",
     "deleteSuccess": "הקבוצה נמחקה",
     "cannotEditDefault": "לא ניתן לערוך את קבוצת ברירת המחדל",
-    "cannotDeleteDefault": "לא ניתן למחוק את קבוצת ברירת המחדל"
+    "cannotDeleteDefault": "לא ניתן למחוק את קבוצת ברירת המחדל",
+    "reassignError": "לא ניתן להעביר מתנדבים לקבוצת ברירת המחדל"
   }
 }
 

@@ -30,7 +30,7 @@
     "editTitle": "Edit group",
     "editDescription": "Update the group name.",
     "deleteTitle": "Delete group",
-    "deleteDescription": "Are you sure you want to delete this group? Volunteers assigned to it should be migrated first."
+    "deleteDescription": "Are you sure you want to delete this group? Volunteers assigned to it will be moved to the Default group."
   },
   "toasts": {
     "createSuccess": "Group created",
@@ -38,7 +38,8 @@
     "updateSuccess": "Group updated",
     "deleteSuccess": "Group deleted",
     "cannotEditDefault": "Default group cannot be edited",
-    "cannotDeleteDefault": "Default group cannot be deleted"
+    "cannotDeleteDefault": "Default group cannot be deleted",
+    "reassignError": "Failed to move volunteers to Default group"
   }
 }
 

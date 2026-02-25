@@ -17,7 +17,8 @@ import { useToast } from "@/components/ui/use-toast";
 import ManagerSidebar from "@/components/manager/ManagerSidebar";
 import { cn } from "@/lib/utils";
 
-import { Timestamp } from "firebase/firestore";
+import { getDocs, query, Timestamp, where, writeBatch } from "firebase/firestore";
+import { volunteersRef } from "@/services/firestore";
 import { ensureDefaultGroup, GroupUI, useAddGroup, useDeleteGroup, useGroups, useUpdateGroup } from "@/hooks/useFirestoreGroups";
 
 const MOBILE_BREAKPOINT = 1024;
@@ -116,6 +117,36 @@ export default function Groups() {
       toast({ title: t("toasts.cannotDeleteDefault"), variant: "destructive" });
       return;
     }
+
+    // Reassign volunteers to default group before deleting (prevents dangling foreign keys)
+    try {
+      const defaultGroup = await ensureDefaultGroup();
+      const q = query(volunteersRef, where("groupAffiliation", "==", selected.id));
+      const snap = await getDocs(q);
+
+      if (!snap.empty) {
+        let batch = writeBatch(db);
+        let writes = 0;
+        const commits: Promise<void>[] = [];
+
+        snap.docs.forEach((d) => {
+          batch.update(d.ref, { groupAffiliation: defaultGroup.id });
+          writes++;
+          if (writes >= 450) {
+            commits.push(batch.commit());
+            batch = writeBatch(db);
+            writes = 0;
+          }
+        });
+        if (writes > 0) commits.push(batch.commit());
+        await Promise.all(commits);
+      }
+    } catch (e) {
+      console.error("Failed reassigning volunteers to default group:", e);
+      toast({ title: t("toasts.reassignError"), variant: "destructive" });
+      return;
+    }
+
     await deleteGroup(selected.id);
     setIsDeleteOpen(false);
     setSelected(null);
