@@ -110,6 +110,8 @@
     "matchingPreference": "Matching Preference",
     "reasonForVolunteering": "Reason for Volunteering",
     "groupAffiliation": "Group Affiliation",
+    "selectGroup": "Select group",
+    "defaultGroup": "default",
     "languages": "Languages",
     "skills": "Skills",
     "hobbies": "Hobbies",

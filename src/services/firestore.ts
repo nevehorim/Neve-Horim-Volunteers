@@ -22,6 +22,18 @@ export interface User {
 export type MatchingPreference = 'oneOnOne' | 'groupActivity' | 'noPreference' | null;
 export type ReasonForVolunteering = 'scholarship' | 'communityService' | 'personalInterest' | 'other' | null;
 
+// GROUPS
+export interface Group {
+  id: string;
+  name: string;
+  /**
+   * Default group cannot be edited/deleted from UI.
+   */
+  isDefault: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 export interface AvailableSlots {
   [dayOfWeek: string]: string[]; // e.g., { "monday": ["morning", "afternoon"] }
 }
@@ -52,6 +64,10 @@ export interface Volunteer {
   skills?: string[];
   hobbies?: string[];
   languages: string[];
+  /**
+   * Foreign key to `groups` collection (`Group.id`).
+   * Legacy data may still contain a free-text value; use migration to convert.
+   */
   groupAffiliation?: string | null;
   matchingPreference?: MatchingPreference;
   reasonForVolunteering?: ReasonForVolunteering;
@@ -334,6 +350,7 @@ export interface ExternalGroup {
 export const usersRef = collection(db, 'users') as CollectionReference<User>;
 export const volunteersRef = collection(db, 'volunteers') as CollectionReference<Volunteer>;
 export const residentsRef = collection(db, 'residents') as CollectionReference<Resident>;
+export const groupsRef = collection(db, 'groups') as CollectionReference<Group>;
 export const calendar_slotsRef = collection(db, 'calendar_slots') as CollectionReference<CalendarSlot>;
 export const appointmentsRef = collection(db, 'appointments') as CollectionReference<Appointment>;
 export const attendanceRef = collection(db, 'attendance') as CollectionReference<Attendance>;
@@ -346,6 +363,7 @@ export const recurrence_rulesRef = collection(db, 'recurrence_rules') as Collect
 export const getUserRef = (id: string) => doc(usersRef, id);
 export const getVolunteerRef = (id: string) => doc(volunteersRef, id);
 export const getResidentRef = (id: string) => doc(residentsRef, id);
+export const getGroupRef = (id: string) => doc(groupsRef, id);
 export const getCalendarSlotRef = (id: string) => doc(calendar_slotsRef, id);
 export const getAppointmentRef = (id: string) => doc(appointmentsRef, id);
 export const getAttendanceRef = (id: string) => doc(attendanceRef, id);

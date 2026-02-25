@@ -358,6 +358,18 @@ export const generateReport = async (
         
         // Group affiliation reports are always individual - filter to specific group
         if (subjectId) {
+          // Resolve group name (subjectId is groupId)
+          let groupName = subjectId;
+          try {
+            const groupDoc = await getDocs(query(collection(db, 'groups'), where('__name__', '==', subjectId)));
+            if (!groupDoc.empty) {
+              const g = groupDoc.docs[0].data() as any;
+              groupName = g.name || subjectId;
+            }
+          } catch {
+            // ignore, fall back to id
+          }
+
           // Check if the specific group affiliation has any volunteers
           const groupVolunteersQuery = query(
             collection(db, 'volunteers'),
@@ -388,7 +400,7 @@ export const generateReport = async (
           }
           
           const subjectReport = {
-            name: subjectId,
+            name: groupName,
             summary: calculateSubjectSummary(allAppointments, 'volunteer'),
             appointments: allAppointments
           };

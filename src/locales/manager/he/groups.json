@@ -1,0 +1,51 @@
+{
+  "title": "ניהול קבוצות",
+  "subtitle": "יצירה וניהול קבוצות מתנדבים",
+  "description": "קבוצות משמשות לסיווג מתנדבים. מתנדבים מפנים לקבוצה באמצעות השדה groupAffiliation (מפתח זר).",
+  "searchPlaceholder": "חיפוש לפי שם קבוצה או מזהה…",
+  "count": "{{count}} קבוצה/ות",
+  "loading": "טוען…",
+  "empty": "לא נמצאו קבוצות.",
+  "badges": {
+    "default": "ברירת מחדל",
+    "custom": "מותאם"
+  },
+  "table": {
+    "name": "שם",
+    "type": "סוג",
+    "actions": "פעולות"
+  },
+  "fields": {
+    "name": "שם הקבוצה"
+  },
+  "actions": {
+    "create": "צור קבוצה",
+    "cancel": "ביטול",
+    "save": "שמור",
+    "delete": "מחק"
+  },
+  "dialogs": {
+    "createTitle": "יצירת קבוצה",
+    "createDescription": "הוסף קבוצה חדשה שניתן לשייך אליה מתנדבים.",
+    "editTitle": "עריכת קבוצה",
+    "editDescription": "עדכן את שם הקבוצה.",
+    "deleteTitle": "מחיקת קבוצה",
+    "deleteDescription": "האם למחוק קבוצה זו? מומלץ להעביר מתנדבים משויכים לפני המחיקה."
+  },
+  "migrate": {
+    "button": "המר השתייכויות ישנות",
+    "confirm": "הפעולה תיצור קבוצות מתוך ערכי groupAffiliation טקסטואליים קיימים ותעדכן מתנדבים למזהה קבוצה. להמשיך?",
+    "doneTitle": "ההמרה הושלמה",
+    "doneDescription": "נוצרו {{createdGroups}} קבוצות ועודכנו {{updatedVolunteers}} מתנדבים.",
+    "error": "ההמרה נכשלה. בדוק את הקונסול ונסה שוב."
+  },
+  "toasts": {
+    "createSuccess": "קבוצה נוצרה",
+    "createError": "יצירת הקבוצה נכשלה",
+    "updateSuccess": "הקבוצה עודכנה",
+    "deleteSuccess": "הקבוצה נמחקה",
+    "cannotEditDefault": "לא ניתן לערוך את קבוצת ברירת המחדל",
+    "cannotDeleteDefault": "לא ניתן למחוק את קבוצת ברירת המחדל"
+  }
+}
+

@@ -31,7 +31,7 @@ import { doc, updateDoc, getDoc, setDoc, query, getDocs } from "firebase/firesto
 
 // Services and Types
 import { getReports, generateReport } from '@/services/reportService';
-import { Report, ReportSubject, ReportScope, reportsRef, ReportType, volunteersRef, residentsRef, external_groupsRef } from '@/services/firestore';
+import { Report, ReportSubject, ReportScope, reportsRef, ReportType, volunteersRef, residentsRef, external_groupsRef, groupsRef } from '@/services/firestore';
 
 // PDF Libraries
 import { jsPDF } from 'jspdf';
@@ -1466,22 +1466,18 @@ const ManagerReports = () => {
         setLoadingParticipants(true);
         
         if (newReport.subject === 'group_affiliation') {
-          // For group affiliation, fetch unique group affiliations from volunteers
+          // For group affiliation, fetch groups list
           try {
-            const volunteersSnapshot = await getDocs(volunteersRef);
-            const groupAffiliations = new Set<string>();
-            
-            volunteersSnapshot.docs.forEach(doc => {
-              const volunteerData = doc.data() as any;
-              if (volunteerData.groupAffiliation && volunteerData.groupAffiliation.trim() !== '') {
-                groupAffiliations.add(volunteerData.groupAffiliation);
-              }
-            });
-            
-            const participants = Array.from(groupAffiliations).sort().map(affiliation => ({
-              id: affiliation,
-              name: affiliation
-            }));
+            const groupsSnapshot = await getDocs(groupsRef);
+            const participants = groupsSnapshot.docs
+              .map(doc => ({ id: doc.id, ...(doc.data() as any) }))
+              .sort((a, b) => {
+                const aDef = Boolean(a.isDefault);
+                const bDef = Boolean(b.isDefault);
+                if (aDef !== bDef) return aDef ? -1 : 1;
+                return String(a.name || '').localeCompare(String(b.name || ''));
+              })
+              .map(g => ({ id: g.id, name: g.name || g.id }));
             setAvailableParticipants(participants);
           } catch (error) {
             console.error('Error fetching group affiliations:', error);

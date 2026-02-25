@@ -1,0 +1,51 @@
+{
+  "title": "Groups",
+  "subtitle": "Create and manage volunteer groups",
+  "description": "Groups are used to categorize volunteers. Volunteers reference a group via the groupAffiliation field (foreign key).",
+  "searchPlaceholder": "Search by group name or ID…",
+  "count": "{{count}} group(s)",
+  "loading": "Loading…",
+  "empty": "No groups found.",
+  "badges": {
+    "default": "Default",
+    "custom": "Custom"
+  },
+  "table": {
+    "name": "Name",
+    "type": "Type",
+    "actions": "Actions"
+  },
+  "fields": {
+    "name": "Group name"
+  },
+  "actions": {
+    "create": "Create group",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete"
+  },
+  "dialogs": {
+    "createTitle": "Create group",
+    "createDescription": "Add a new group that volunteers can be assigned to.",
+    "editTitle": "Edit group",
+    "editDescription": "Update the group name.",
+    "deleteTitle": "Delete group",
+    "deleteDescription": "Are you sure you want to delete this group? Volunteers assigned to it should be migrated first."
+  },
+  "migrate": {
+    "button": "Migrate legacy affiliations",
+    "confirm": "This will convert existing volunteers with text groupAffiliation into groups and set their groupAffiliation to a group ID. Continue?",
+    "doneTitle": "Migration complete",
+    "doneDescription": "Created {{createdGroups}} group(s) and updated {{updatedVolunteers}} volunteer(s).",
+    "error": "Migration failed. Please check the console and try again."
+  },
+  "toasts": {
+    "createSuccess": "Group created",
+    "createError": "Failed to create group",
+    "updateSuccess": "Group updated",
+    "deleteSuccess": "Group deleted",
+    "cannotEditDefault": "Default group cannot be edited",
+    "cannotDeleteDefault": "Default group cannot be deleted"
+  }
+}
+

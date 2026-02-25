@@ -155,6 +155,18 @@ const ManagerSidebar = ({ isOpen, onClose, isMobile, onLogout }: ManagerSidebarP
           </Link>
 
           <Link
+            to="/manager/groups"
+            className={cn(
+              "flex items-center px-3 py-2 text-sm font-medium rounded-md space-x-3",
+              isActive("/manager/groups") ? "bg-slate-100 text-slate-900" : "text-slate-700 hover:bg-slate-50",
+              isRTL && "space-x-reverse text-right"
+            )}
+          >
+            <Users2 className="h-5 w-5 text-slate-500" />
+            <span>{t('groups')}</span>
+          </Link>
+
+          <Link
             to="/manager/matching-rules"
             className={cn(
               "flex items-center px-3 py-2 text-sm font-medium rounded-md space-x-3",

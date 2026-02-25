@@ -205,6 +205,7 @@ import DataTableSkeleton from "@/components/skeletons/DataTableSkeleton";
 // Custom hooks
 import { useAddUser, useDeleteUser, useUsers, useUpdateUser } from "@/hooks/useFirestoreUsers";
 import { useVolunteers, useAddVolunteer, useUpdateVolunteer, useDeleteVolunteer, VolunteerUI } from "@/hooks/useFirestoreVolunteers";
+import { ensureDefaultGroup, useGroups } from "@/hooks/useFirestoreGroups";
 
 // Types and interfaces
 import { Volunteer, User as FirestoreUser, MatchingPreference, ReasonForVolunteering } from "@/services/firestore";
@@ -608,6 +609,13 @@ const ManagerVolunteers = () => {
 
   // Firestore hooks
   const { volunteers, loading: volunteersLoading, error: volunteersError } = useVolunteers();
+  const { groups } = useGroups();
+  const defaultGroupId = useMemo(() => groups.find(g => g.isDefault)?.id || null, [groups]);
+  const groupNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    groups.forEach(g => m.set(g.id, g.name));
+    return m;
+  }, [groups]);
   const { users, loading: usersLoading } = useUsers();
   const { addUser } = useAddUser();
   const { updateUser } = useUpdateUser();
@@ -615,6 +623,18 @@ const ManagerVolunteers = () => {
   const { addVolunteer, loading: isCreating, error: createError } = useAddVolunteer();
   const { updateVolunteer, loading: isEditing, error: updateError } = useUpdateVolunteer();
   const { deleteVolunteer, loading: isDeleting, error: deleteError } = useDeleteVolunteer();
+
+  useEffect(() => {
+    ensureDefaultGroup().catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!defaultGroupId) return;
+    setNewVolunteer((prev) => ({
+      ...prev,
+      groupAffiliation: prev.groupAffiliation ?? defaultGroupId,
+    }));
+  }, [defaultGroupId]);
 
   // Check if user is authenticated
   useEffect(() => {
@@ -1199,7 +1219,7 @@ const ManagerVolunteers = () => {
         `"${translateArray(volunteer.skills || [], isRTL).join("; ").replace(/"/g, '""')}"`,
         `"${translateArray(volunteer.hobbies || [], isRTL).join("; ").replace(/"/g, '""')}"`,
         `"${translateArray(volunteer.languages || [], isRTL).join("; ").replace(/"/g, '""')}"`,
-        `"${(volunteer.groupAffiliation || "").replace(/"/g, '""')}"`,
+        `"${(groupNameById.get(volunteer.groupAffiliation || "") || volunteer.groupAffiliation || "").replace(/"/g, '""')}"`,
         `"${translateMatchingPreference(volunteer.matchingPreference || "", isRTL)}"`,
         `"${translateReason(volunteer.reasonForVolunteering || "", isRTL)}"`,
         `"${(volunteer.notes || "").replace(/"/g, '""')}"`
@@ -1315,7 +1335,12 @@ const ManagerVolunteers = () => {
               skills: translateArray(row[5]?.split(';').map(s => s.trim()) || [], isRTL, 'import'),
               hobbies: translateArray(row[6]?.split(';').map(h => h.trim()) || [], isRTL, 'import'),
               languages: translateArray(row[7]?.split(';').map(l => l.trim()) || [], isRTL, 'import'),
-              groupAffiliation: row[8] || null,
+              groupAffiliation: (() => {
+                const rawGroup = (row[8] || "").trim();
+                if (!rawGroup) return defaultGroupId;
+                const match = groups.find(g => g.name.toLowerCase() === rawGroup.toLowerCase());
+                return match ? match.id : defaultGroupId;
+              })(),
               matchingPreference,
               reasonForVolunteering,
               notes: row[11] || null,
@@ -2365,13 +2390,21 @@ const ManagerVolunteers = () => {
 
                 <div className="space-y-2">
                   <Label htmlFor="groupAffiliation" className="text-sm font-medium text-slate-700">{t('forms.groupAffiliation')}</Label>
-                  <Input
-                    id="groupAffiliation"
-                    placeholder={t('forms.enterGroupAffiliation')}
-                    value={newVolunteer.groupAffiliation || ""}
-                    onChange={(e) => setNewVolunteer({ ...newVolunteer, groupAffiliation: e.target.value || null })}
-                    className="h-10 bg-white border-slate-300 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-                  />
+                  <Select
+                    value={newVolunteer.groupAffiliation || defaultGroupId || ""}
+                    onValueChange={(value) => setNewVolunteer({ ...newVolunteer, groupAffiliation: value || null })}
+                  >
+                    <SelectTrigger className="h-10 bg-white border-slate-300 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0" dir={isRTL ? 'rtl' : 'ltr'}>
+                      <SelectValue placeholder={t('forms.selectGroup')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {groups.map((g) => (
+                        <SelectItem key={g.id} value={g.id}>
+                          {g.name}{g.isDefault ? ` (${t('forms.defaultGroup')})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-2">
@@ -2803,11 +2836,21 @@ const ManagerVolunteers = () => {
 
                   <div className="space-y-2">
                     <Label htmlFor="edit-groupAffiliation" className="text-sm font-medium text-slate-700">{t('forms.groupAffiliation')}</Label>
-                    <Input
-                      id="edit-groupAffiliation"
-                      placeholder={t('forms.enterGroupAffiliation')}
-                      value={selectedVolunteer.groupAffiliation || ""}
-                      onChange={(e) => setSelectedVolunteer({ ...selectedVolunteer, groupAffiliation: e.target.value || null })} className="h-10 bg-white border-slate-300 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0" />
+                    <Select
+                      value={selectedVolunteer.groupAffiliation || defaultGroupId || ""}
+                      onValueChange={(value) => setSelectedVolunteer({ ...selectedVolunteer, groupAffiliation: value || null })}
+                    >
+                      <SelectTrigger className="h-10 bg-white border-slate-300 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0" dir={isRTL ? 'rtl' : 'ltr'}>
+                        <SelectValue placeholder={t('forms.selectGroup')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {groups.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            {g.name}{g.isDefault ? ` (${t('forms.defaultGroup')})` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="space-y-2">

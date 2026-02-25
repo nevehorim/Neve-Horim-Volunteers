@@ -111,6 +111,8 @@
     "skills": "כישורים",
     "hobbies": "תחביבים",
     "groupAffiliation": "השתייכות קבוצתית",
+    "selectGroup": "בחר קבוצה",
+    "defaultGroup": "ברירת מחדל",
     "matchingPreference": "העדפת התאמה",
     "reasonForVolunteering": "סיבת ההתנדבות",
     "notesPlaceholder": "הכנס הערות נוספות על המתנדב",

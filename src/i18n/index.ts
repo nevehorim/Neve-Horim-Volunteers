@@ -16,6 +16,7 @@ import enReports from '../locales/manager/en/reports.json';
 import enSettings from '../locales/manager/en/settings.json';
 import enFacilityAttendance from '../locales/manager/en/facility-attendance.json';
 import enAllAttendance from '../locales/manager/en/all-attendance.json';
+import enGroups from '../locales/manager/en/groups.json';
 // ---------- Volunteer (en) ----------
 import enIndex from '../locales/volunteer/en/index.json';
 import enLogin from '../locales/volunteer/en/login.json';
@@ -39,6 +40,7 @@ import heReports from '../locales/manager/he/reports.json';
 import heSettings from '../locales/manager/he/settings.json';
 import heFacilityAttendance from '../locales/manager/he/facility-attendance.json';
 import heAllAttendance from '../locales/manager/he/all-attendance.json';
+import heGroups from '../locales/manager/he/groups.json';
 // ---------- Volunteer (he) ----------
 import heIndex from '../locales/volunteer/he/index.json';
 import heLogin from '../locales/volunteer/he/login.json';
@@ -65,6 +67,7 @@ const resources = {
     'manager-dashboard': enDashboard,
     'manager-facility-attendance': enFacilityAttendance,
     'manager-all-attendance': enAllAttendance,
+    'manager-groups': enGroups,
     // Volunteer translations
     translation: enIndex, // Default namespace for homepage
     login: enLogin,
@@ -90,6 +93,7 @@ const resources = {
     'manager-dashboard': heDashboard,
     'manager-facility-attendance': heFacilityAttendance,
     'manager-all-attendance': heAllAttendance,
+    'manager-groups': heGroups,
     // Volunteer translations
     translation: heIndex, // Default namespace for homepage
     login: heLogin,

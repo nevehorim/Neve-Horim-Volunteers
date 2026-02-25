@@ -34,6 +34,7 @@ import Calendar from "@/pages/manager/Calendar";
 import Appointments from "@/pages/manager/Appointments";
 import Volunteers from "@/pages/manager/Volunteers";
 import Residents from "@/pages/manager/Residents";
+import Groups from "@/pages/manager/Groups";
 import MatchingRules from "@/pages/manager/MatchingRules";
 import Reports from "@/pages/manager/Reports";
 import Settings from "@/pages/manager/Settings";
@@ -140,6 +141,10 @@ const App = () => (
                 <Route
                   path="/manager/residents"
                   element={<RoleRoute role="manager" element={<Residents />} />}
+                />
+                <Route
+                  path="/manager/groups"
+                  element={<RoleRoute role="manager" element={<Groups />} />}
                 />
                 <Route
                   path="/manager/matching-rules"
