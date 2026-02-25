@@ -616,6 +616,14 @@ const ManagerVolunteers = () => {
     groups.forEach(g => m.set(g.id, g.name));
     return m;
   }, [groups]);
+  const normalizeGroupAffiliation = (value?: string | null): string | null => {
+    const raw = (value || "").trim();
+    if (!raw) return defaultGroupId;
+    if (groupNameById.has(raw)) return raw; // already a valid groupId
+    const byName = groups.find(g => (g.name || "").trim().toLowerCase() === raw.toLowerCase());
+    if (byName) return byName.id;
+    return defaultGroupId;
+  };
   const { users, loading: usersLoading } = useUsers();
   const { addUser } = useAddUser();
   const { updateUser } = useUpdateUser();
@@ -943,7 +951,7 @@ const ManagerVolunteers = () => {
         // Optional fields, ensuring they are correctly typed (null or array defaults)
         skills: newVolunteer.skills || [],
         hobbies: newVolunteer.hobbies || [],
-        groupAffiliation: newVolunteer.groupAffiliation === undefined ? null : newVolunteer.groupAffiliation,
+        groupAffiliation: normalizeGroupAffiliation(newVolunteer.groupAffiliation),
         matchingPreference: newVolunteer.matchingPreference === undefined ? null : newVolunteer.matchingPreference,
         reasonForVolunteering: newVolunteer.reasonForVolunteering === undefined ? null : newVolunteer.reasonForVolunteering,
         availability: newVolunteer.availability || { monday: [], tuesday: [], wednesday: [], thursday: [], friday: [], saturday: [], sunday: [] },
@@ -1052,7 +1060,10 @@ const ManagerVolunteers = () => {
 
       // Update volunteer data
       const { id, createdAt, ...updateData } = selectedVolunteer;
-      await updateVolunteer(id, updateData);
+      await updateVolunteer(id, {
+        ...updateData,
+        groupAffiliation: normalizeGroupAffiliation((updateData as any).groupAffiliation),
+      });
 
       // Update user data (username, password, and isActive status)
       if (selectedVolunteer.userId) {
@@ -1579,7 +1590,10 @@ const ManagerVolunteers = () => {
             size="icon"
             onClick={(e) => {
               e.stopPropagation();
-              setSelectedVolunteer(volunteer);
+              setSelectedVolunteer({
+                ...volunteer,
+                groupAffiliation: normalizeGroupAffiliation(volunteer.groupAffiliation),
+              });
               const user = users.find(u => u.id === volunteer.userId);
               setEditedUsername(user?.username || "");
               setEditedPassword(""); // Don't show the hashed password
@@ -1615,7 +1629,10 @@ const ManagerVolunteers = () => {
         const volunteerId = event.data.volunteerId;
         const volunteer = volunteers.find(v => v.id === volunteerId);
         if (volunteer) {
-          setSelectedVolunteer(volunteer);
+          setSelectedVolunteer({
+            ...volunteer,
+            groupAffiliation: normalizeGroupAffiliation(volunteer.groupAffiliation),
+          });
           const user = users.find(u => u.id === volunteer.userId);
           setEditedUsername(user?.username || "");
           setEditedPassword(""); // Don't show the hashed password
@@ -2391,7 +2408,7 @@ const ManagerVolunteers = () => {
                 <div className="space-y-2">
                   <Label htmlFor="groupAffiliation" className="text-sm font-medium text-slate-700">{t('forms.groupAffiliation')}</Label>
                   <Select
-                    value={newVolunteer.groupAffiliation || defaultGroupId || ""}
+                    value={normalizeGroupAffiliation(newVolunteer.groupAffiliation) || ""}
                     onValueChange={(value) => setNewVolunteer({ ...newVolunteer, groupAffiliation: value || null })}
                   >
                     <SelectTrigger className="h-10 bg-white border-slate-300 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0" dir={isRTL ? 'rtl' : 'ltr'}>
@@ -2837,7 +2854,7 @@ const ManagerVolunteers = () => {
                   <div className="space-y-2">
                     <Label htmlFor="edit-groupAffiliation" className="text-sm font-medium text-slate-700">{t('forms.groupAffiliation')}</Label>
                     <Select
-                      value={selectedVolunteer.groupAffiliation || defaultGroupId || ""}
+                      value={normalizeGroupAffiliation(selectedVolunteer.groupAffiliation) || ""}
                       onValueChange={(value) => setSelectedVolunteer({ ...selectedVolunteer, groupAffiliation: value || null })}
                     >
                       <SelectTrigger className="h-10 bg-white border-slate-300 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0" dir={isRTL ? 'rtl' : 'ltr'}>
