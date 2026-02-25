@@ -46,6 +46,24 @@
     "checkedInAt": "נרשם בשעה",
     "allAttendanceConfirmed": "כל הנוכחות אושרה באופן ידני"
   },
+  "birthdays": {
+    "title": "ימי הולדת",
+    "description": "ימי הולדת קרובים",
+    "count": "{{count}}",
+    "empty": "אין ימי הולדת בטווח שנבחר.",
+    "turning": "חוגג/ת {{age}}",
+    "kinds": {
+      "volunteer": "מתנדב",
+      "resident": "דייר"
+    },
+    "range": {
+      "placeholder": "טווח",
+      "thisWeek": "השבוע",
+      "thisMonth": "החודש",
+      "next7Days": "7 הימים הבאים",
+      "next30Days": "30 הימים הבאים"
+    }
+  },
   "missingAttendance": {
     "title": "נוכחות חסרה",
     "description": "מתנדבים שהשתתפו אך אין להם רישומי נוכחות",

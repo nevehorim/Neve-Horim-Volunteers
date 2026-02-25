@@ -23,7 +23,8 @@ import {
   AlertTriangle,
   Target,
   TrendingUp,
-  TrendingDown
+  TrendingDown,
+  Gift
 } from "lucide-react";
 
 // UI Components
@@ -31,6 +32,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+import { addDays, endOfMonth, endOfWeek, startOfDay } from "date-fns";
 
 // Custom Components
 import ManagerSidebar from "@/components/manager/ManagerSidebar";
@@ -46,6 +50,38 @@ import { useVolunteers } from "@/hooks/useFirestoreVolunteers";
 import { useAppointments } from "@/hooks/useFirestoreCalendar";
 import { useCalendarSlots } from "@/hooks/useFirestoreCalendar";
 
+type BirthdayRange = "this_week" | "this_month" | "next_7_days" | "next_30_days";
+
+const isLeapYear = (year: number) => (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+
+const parseBirthDate = (birthDate: string): { year: number; month: number; day: number } | null => {
+  if (!birthDate) return null;
+  const parts = birthDate.split("-").map((p) => Number(p));
+  if (parts.length !== 3) return null;
+  const [year, month, day] = parts;
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  if (month < 1 || month > 12) return null;
+  if (day < 1 || day > 31) return null;
+  return { year, month, day };
+};
+
+const nextBirthdayDate = (birthDate: string, from: Date): Date | null => {
+  const parsed = parseBirthDate(birthDate);
+  if (!parsed) return null;
+
+  const fromStart = startOfDay(from);
+  const buildForYear = (year: number) => {
+    let day = parsed.day;
+    if (parsed.month === 2 && parsed.day === 29 && !isLeapYear(year)) day = 28;
+    return startOfDay(new Date(year, parsed.month - 1, day));
+  };
+
+  const year = from.getFullYear();
+  const candidate = buildForYear(year);
+  if (candidate < fromStart) return buildForYear(year + 1);
+  return candidate;
+};
+
 const ManagerDashboard = () => {
   const navigate = useNavigate();
   const { t } = useTranslation('manager-dashboard');
@@ -53,6 +89,7 @@ const ManagerDashboard = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
   const [isLoading, setIsLoading] = useState(true);
+  const [birthdayRange, setBirthdayRange] = useState<BirthdayRange>("this_week");
 
   // Real data hooks
   const { volunteers, loading: volunteersLoading } = useVolunteers();
@@ -64,6 +101,67 @@ const ManagerDashboard = () => {
   // Compute dashboard stats
   const today = new Date();
   const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+
+  const upcomingBirthdays = (() => {
+    const from = startOfDay(today);
+    const weekStartsOn = language === "he" ? 0 : 1;
+
+    const rangeEnd = (() => {
+      switch (birthdayRange) {
+        case "this_week":
+          return endOfWeek(from, { weekStartsOn });
+        case "this_month":
+          return endOfMonth(from);
+        case "next_7_days":
+          return addDays(from, 7);
+        case "next_30_days":
+          return addDays(from, 30);
+      }
+    })();
+
+    const people: Array<{
+      id: string;
+      name: string;
+      kind: "volunteer" | "resident";
+      birthDate: string;
+    }> = [
+      ...volunteers.map((v) => ({ id: v.id, name: v.fullName || v.id, kind: "volunteer" as const, birthDate: v.birthDate })),
+      ...residents.map((r) => ({ id: r.id, name: r.fullName || r.id, kind: "resident" as const, birthDate: r.birthDate })),
+    ];
+
+    const locale = language === "he" ? "he-IL" : "en-US";
+
+    const items = people
+      .map((p) => {
+        const next = nextBirthdayDate(p.birthDate, from);
+        if (!next) return null;
+        if (next < from || next > rangeEnd) return null;
+        const parsed = parseBirthDate(p.birthDate);
+        const age = parsed ? next.getFullYear() - parsed.year : null;
+        const options: Intl.DateTimeFormatOptions =
+          next.getFullYear() !== from.getFullYear()
+            ? { month: "short", day: "2-digit", year: "numeric" }
+            : { month: "short", day: "2-digit" };
+        return {
+          ...p,
+          next,
+          age: age && age > 0 ? age : null,
+          dateLabel: next.toLocaleDateString(locale, options),
+        };
+      })
+      .filter(Boolean) as Array<{
+        id: string;
+        name: string;
+        kind: "volunteer" | "resident";
+        birthDate: string;
+        next: Date;
+        age: number | null;
+        dateLabel: string;
+      }>;
+
+    items.sort((a, b) => a.next.getTime() - b.next.getTime());
+    return items;
+  })();
 
   const todaySessions = slots.filter(slot => slot.date === todayStr);
   const unconfirmedSessions = todaySessions.filter(slot => slot.status !== "full").length;
@@ -1056,6 +1154,81 @@ const ManagerDashboard = () => {
                           <div className="text-center py-6">
                             <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto mb-2" />
                             <p className="text-sm text-slate-500">{t('missingAttendance.allAttendanceMarked')}</p>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Birthdays */}
+                  <Card className="shadow-md rounded-2xl border border-slate-300 bg-white/95 hover:shadow-lg transition-shadow duration-200">
+                    <CardHeader className="pb-2 border-b border-slate-300">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                            <Gift className="h-5 w-5 text-primary" />
+                            {t('birthdays.title')}
+                          </CardTitle>
+                          <CardDescription className="mt-1">{t('birthdays.description')}</CardDescription>
+                        </div>
+
+                        <div className={cn("flex items-center gap-3", isRTL && "flex-row-reverse")}>
+                          {upcomingBirthdays.length > 0 && (
+                            <Badge variant="secondary" className="h-7 px-3 bg-indigo-50 text-indigo-700 border-indigo-500 hover:border-indigo-600 hover:bg-indigo-100 transition-colors font-medium text-sm shadow-sm">
+                              {t('birthdays.count', { count: upcomingBirthdays.length })}
+                            </Badge>
+                          )}
+
+                          <Select value={birthdayRange} onValueChange={(v) => setBirthdayRange(v as BirthdayRange)} dir={isRTL ? "rtl" : "ltr"}>
+                            <SelectTrigger className="w-[210px] bg-white border-slate-300">
+                              <SelectValue placeholder={t('birthdays.range.placeholder')} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="this_week">{t('birthdays.range.thisWeek')}</SelectItem>
+                              <SelectItem value="this_month">{t('birthdays.range.thisMonth')}</SelectItem>
+                              <SelectItem value="next_7_days">{t('birthdays.range.next7Days')}</SelectItem>
+                              <SelectItem value="next_30_days">{t('birthdays.range.next30Days')}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </CardHeader>
+
+                    <CardContent className="p-6 pt-4">
+                      <div className={cn("space-y-3 max-h-[184px] overflow-y-auto", isRTL ? "pl-2" : "pr-2")}>
+                        {upcomingBirthdays.length > 0 ? (
+                          upcomingBirthdays.map((p) => (
+                            <div
+                              key={`${p.kind}-${p.id}`}
+                              className={cn(
+                                "p-4 border rounded-lg cursor-pointer transition-colors mb-2 flex items-center justify-between",
+                                p.kind === "volunteer"
+                                  ? "bg-blue-50 hover:bg-blue-100 border-blue-500 hover:border-blue-600"
+                                  : "bg-pink-50 hover:bg-pink-100 border-pink-500 hover:border-pink-600"
+                              )}
+                              onClick={() => (p.kind === "volunteer" ? handleViewVolunteer(p.id) : handleViewResident(p.id))}
+                            >
+                              <div className="min-w-0">
+                                <div className="font-medium text-black truncate">{p.name}</div>
+                                <div className="text-sm text-slate-500 mt-1 flex items-center gap-2">
+                                  <span>{p.dateLabel}</span>
+                                  {p.age !== null && <span className="text-slate-400">• {t('birthdays.turning', { age: p.age })}</span>}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <Badge variant="secondary" className={cn(
+                                  "border",
+                                  p.kind === "volunteer" ? "bg-blue-100 text-blue-800 border-blue-300" : "bg-pink-100 text-pink-800 border-pink-300"
+                                )}>
+                                  {p.kind === "volunteer" ? t('birthdays.kinds.volunteer') : t('birthdays.kinds.resident')}
+                                </Badge>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-center py-6">
+                            <Gift className="h-8 w-8 text-indigo-500 mx-auto mb-2" />
+                            <p className="text-sm text-slate-500">{t('birthdays.empty')}</p>
                           </div>
                         )}
                       </div>

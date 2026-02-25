@@ -46,6 +46,24 @@
     "checkedInAt": "Checked in at",
     "allAttendanceConfirmed": "All attendance manually confirmed"
   },
+  "birthdays": {
+    "title": "Birthdays",
+    "description": "Upcoming birthdays",
+    "count": "{{count}}",
+    "empty": "No birthdays in this range.",
+    "turning": "Turning {{age}}",
+    "kinds": {
+      "volunteer": "Volunteer",
+      "resident": "Resident"
+    },
+    "range": {
+      "placeholder": "Range",
+      "thisWeek": "This week",
+      "thisMonth": "This month",
+      "next7Days": "Next 7 days",
+      "next30Days": "Next 30 days"
+    }
+  },
   "missingAttendance": {
     "title": "Missing Attendance",
     "description": "Volunteers who attended but have no attendance records",
