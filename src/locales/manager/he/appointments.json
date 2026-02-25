@@ -11,7 +11,11 @@
     "canceled": "בוטלו",
     "specificDate": "תאריך ספציפי",
     "pickDateRange": "בחר טווח תאריכים",
-    "clearRange": "נקה טווח"
+    "clearRange": "נקה טווח",
+    "affiliationGroup": {
+      "placeholder": "קבוצה (השתייכות קבוצתית)",
+      "allGroups": "כל הקבוצות"
+    }
   },
   "actions": {
     "export": "ייצא",

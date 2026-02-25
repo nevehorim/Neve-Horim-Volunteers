@@ -8,6 +8,10 @@
     "facility": "Facility"
   },
   "searchPlaceholder": "Search volunteer name or ID…",
+  "groupFilter": {
+    "placeholder": "Affiliation group",
+    "allGroups": "All groups"
+  },
   "count": "{{count}} record(s)",
   "loading": "Loading…",
   "empty": "No attendance records match your filters.",

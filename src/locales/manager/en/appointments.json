@@ -11,7 +11,11 @@
     "canceled": "Canceled",
     "specificDate": "Specific Date",
     "pickDateRange": "Pick a date range",
-    "clearRange": "Clear Range"
+    "clearRange": "Clear Range",
+    "affiliationGroup": {
+      "placeholder": "Affiliation group",
+      "allGroups": "All groups"
+    }
   },
   "actions": {
     "export": "Export",

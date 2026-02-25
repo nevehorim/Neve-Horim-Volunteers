@@ -46,6 +46,7 @@ interface NewReportForm {
   subject: ReportSubject;
   scope: ReportScope;
   selectedSubjectId: string;
+  groupId: string;
   startDate: string;
   endDate: string;
   format: string;
@@ -543,6 +544,7 @@ const ManagerReports = () => {
     subject: "volunteer",
     scope: "all",
     selectedSubjectId: "",
+    groupId: "all",
     startDate: "",
     endDate: "",
     format: "pdf",
@@ -552,6 +554,8 @@ const ManagerReports = () => {
   const [generating, setGenerating] = useState(false);
   const [availableParticipants, setAvailableParticipants] = useState<Participant[]>([]);
   const [loadingParticipants, setLoadingParticipants] = useState(false);
+  const [availableGroups, setAvailableGroups] = useState<Participant[]>([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
   const [availableGroupAffiliations, setAvailableGroupAffiliations] = useState<string[]>([]);
   const [loadingGroupAffiliations, setLoadingGroupAffiliations] = useState(false);
 
@@ -645,6 +649,7 @@ const ManagerReports = () => {
       subject: "volunteer",
       scope: "all",
       selectedSubjectId: "",
+      groupId: "all",
       startDate: "",
       endDate: "",
       format: "pdf",
@@ -695,7 +700,13 @@ const ManagerReports = () => {
           startDate,
           endDate,
           user.id,
-          (scope === 'individual' || newReport.subject === 'group_affiliation') ? newReport.selectedSubjectId : undefined
+          (scope === 'individual' || newReport.subject === 'group_affiliation') ? newReport.selectedSubjectId : undefined,
+          {
+            groupId:
+              newReport.subject === 'volunteer' && scope === 'all' && newReport.groupId && newReport.groupId !== 'all'
+                ? newReport.groupId
+                : null
+          }
         );
       } catch (error: any) {
         setGenerating(false);
@@ -1518,6 +1529,40 @@ const ManagerReports = () => {
     fetchParticipants();
   }, [newReport.subject, newReport.scope]);
 
+  useEffect(() => {
+    const fetchGroupsForVolunteerFilter = async () => {
+      const shouldFetch =
+        isGenerateDialogOpen && newReport.subject === 'volunteer' && newReport.scope === 'all';
+      if (!shouldFetch) {
+        setAvailableGroups([]);
+        setLoadingGroups(false);
+        return;
+      }
+
+      setLoadingGroups(true);
+      try {
+        const groupsSnapshot = await getDocs(groupsRef);
+        const groups = groupsSnapshot.docs
+          .map((d) => ({ id: d.id, ...(d.data() as any) }))
+          .sort((a, b) => {
+            const aDef = Boolean(a.isDefault);
+            const bDef = Boolean(b.isDefault);
+            if (aDef !== bDef) return aDef ? -1 : 1;
+            return String(a.name || '').localeCompare(String(b.name || ''));
+          })
+          .map((g) => ({ id: g.id, name: g.name || g.id }));
+        setAvailableGroups(groups);
+      } catch (error) {
+        console.error('Error fetching groups:', error);
+        setAvailableGroups([]);
+      } finally {
+        setLoadingGroups(false);
+      }
+    };
+
+    fetchGroupsForVolunteerFilter();
+  }, [isGenerateDialogOpen, newReport.subject, newReport.scope]);
+
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-white to-blue-50 min-h-screen" dir={dir}>
@@ -1862,6 +1907,7 @@ const ManagerReports = () => {
             subject: "volunteer",
             scope: "all",
             selectedSubjectId: "",
+            groupId: "all",
             startDate: "",
             endDate: "",
             format: "pdf",
@@ -1909,7 +1955,8 @@ const ManagerReports = () => {
                       setNewReport({
                         ...newReport,
                         subject: value as ReportSubject,
-                        selectedSubjectId: "" // Reset selected participant when type changes
+                        selectedSubjectId: "", // Reset selected participant when type changes
+                        groupId: "all" // Reset volunteer group filter when type changes
                       });
                     }}
                     dir={dir}
@@ -1939,7 +1986,8 @@ const ManagerReports = () => {
                         setNewReport({
                           ...newReport,
                           scope: value as ReportScope,
-                          selectedSubjectId: "" // Reset selected participant when scope changes
+                          selectedSubjectId: "", // Reset selected participant when scope changes
+                          groupId: "all" // Reset volunteer group filter when scope changes
                         });
                       }}
                       dir={dir}
@@ -1955,6 +2003,41 @@ const ManagerReports = () => {
                         <SelectItem value="individual">{t('generateDialog.scope.individual')}</SelectItem>
                       </SelectContent>
                     </Select>
+                  </div>
+                )}
+
+                {/* Volunteer Group Filter (only for "All volunteers") */}
+                {newReport.subject === 'volunteer' && newReport.scope === 'all' && (
+                  <div className="space-y-2">
+                    <Label className={cn(isRTL && "text-right")}>{t('generateDialog.groupFilter.label')}</Label>
+                    {loadingGroups ? (
+                      <p className={cn("text-sm text-slate-500", isRTL && "text-right")}>
+                        {t('actions.loading')}
+                      </p>
+                    ) : (
+                      <Select
+                        value={newReport.groupId}
+                        onValueChange={(value) => setNewReport({ ...newReport, groupId: value })}
+                        dir={dir}
+                      >
+                        <SelectTrigger
+                          className={cn(
+                            "w-full focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0",
+                            isRTL && "text-right"
+                          )}
+                        >
+                          <SelectValue placeholder={t('generateDialog.groupFilter.placeholder')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">{t('generateDialog.groupFilter.allGroups')}</SelectItem>
+                          {availableGroups.map((g) => (
+                            <SelectItem key={g.id} value={g.id}>
+                              {g.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                 )}
 

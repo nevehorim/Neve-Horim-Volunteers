@@ -8,6 +8,10 @@
     "facility": "מוסד"
   },
   "searchPlaceholder": "חיפוש לפי שם מתנדב או מזהה…",
+  "groupFilter": {
+    "placeholder": "קבוצה (השתייכות קבוצתית)",
+    "allGroups": "כל הקבוצות"
+  },
   "count": "{{count}} רשומות",
   "loading": "טוען…",
   "empty": "אין רשומות נוכחות התואמות לסינון.",

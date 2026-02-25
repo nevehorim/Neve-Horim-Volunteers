@@ -67,6 +67,11 @@
     "endDate": "End Date",
     "selectDate": "Select a date",
     "generateButton": "Generate Report",
+    "groupFilter": {
+      "label": "Affiliation group",
+      "placeholder": "All groups",
+      "allGroups": "All groups"
+    },
     "participants": {
       "volunteer": "Volunteer",
       "resident": "Resident",

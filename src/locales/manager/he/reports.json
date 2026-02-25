@@ -67,6 +67,11 @@
     "endDate": "תאריך סיום",
     "selectDate": "בחר תאריך",
     "generateButton": "צור דוח",
+    "groupFilter": {
+      "label": "קבוצה (השתייכות קבוצתית)",
+      "placeholder": "כל הקבוצות",
+      "allGroups": "כל הקבוצות"
+    },
     "participants": {
       "volunteer": "מתנדב",
       "resident": "דייר",

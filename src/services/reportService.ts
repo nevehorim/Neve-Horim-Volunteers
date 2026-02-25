@@ -273,7 +273,8 @@ const createReportObject = (
   endDate: string,
   userId: string,
   subjectId: string | null,
-  subjects: SubjectReport[]
+  subjects: SubjectReport[],
+  groupId: string | null = null
 ): Report => {
   // Calculate unique sessions (appointments that occurred at the same date/time are the same session)
   const uniqueSessions = new Set<string>();
@@ -302,7 +303,8 @@ const createReportObject = (
     filters: {
       startDate,
       endDate,
-      subjectId: subjectId || null
+      subjectId: subjectId || null,
+      groupId
     },
     data: {
       summary: {
@@ -332,7 +334,8 @@ export const generateReport = async (
   startDate: string,
   endDate: string,
   userId: string,
-  subjectId?: string
+  subjectId?: string,
+  options?: { groupId?: string | null }
 ): Promise<Report> => {
   // Get the subject type and scope from the report type
   const lastUnderscoreIndex = type.lastIndexOf('_');
@@ -344,7 +347,10 @@ export const generateReport = async (
   try {
     switch (subject) {
       case 'volunteer':
-        subjectsQuery = query(collection(db, 'volunteers'));
+        subjectsQuery = query(
+          collection(db, 'volunteers'),
+          ...(options?.groupId ? [where('groupAffiliation', '==', options.groupId)] : [])
+        );
         break;
       case 'resident':
         subjectsQuery = query(collection(db, 'residents'));
@@ -476,7 +482,15 @@ export const generateReport = async (
 
 
     // Create report object
-    const report = createReportObject(type, startDate, endDate, userId, scope === 'individual' ? subjectId : null, subjects);
+    const report = createReportObject(
+      type,
+      startDate,
+      endDate,
+      userId,
+      scope === 'individual' ? subjectId : null,
+      subjects,
+      options?.groupId ?? null
+    );
 
     // Save report to Firestore
     const reportRef = doc(collection(db, 'reports'), report.id);

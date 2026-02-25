@@ -27,6 +27,7 @@ import { AppointmentStatus } from '@/services/firestore';
 import { useVolunteers } from "@/hooks/useFirestoreVolunteers";
 import { useCalendarSlots } from "@/hooks/useFirestoreCalendar";
 import { useExternalGroups } from "@/hooks/useFirestoreCalendar";
+import { useGroups } from "@/hooks/useFirestoreGroups";
 import ManagerSidebar from "@/components/manager/ManagerSidebar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useUpdateAppointment } from "@/hooks/useFirestoreCalendar";
@@ -53,12 +54,14 @@ const ManagerAppointments = () => {
   // Get real data from hooks
   const { appointments, loading: appointmentsLoading } = useAppointments();
   const { slots, loading: slotsLoading } = useCalendarSlots();
-  const { externalGroups, loading: groupsLoading } = useExternalGroups();
+  const { externalGroups, loading: externalGroupsLoading } = useExternalGroups();
   const { updateAppointment, loading: isUpdating } = useUpdateAppointment();
   const { volunteers } = useVolunteers();
+  const { groups: affiliationGroups, loading: affiliationGroupsLoading } = useGroups();
 
   // Filter state
   const [activeTab, setActiveTab] = useState("upcoming");
+  const [affiliationGroupId, setAffiliationGroupId] = useState<string>("all");
   const [dateRange, setDateRange] = useState<{
     from: Date | undefined;
     to: Date | undefined;
@@ -78,6 +81,12 @@ const ManagerAppointments = () => {
   const { updateAttendance, loading: isUpdatingAttendance } = useUpdateAttendance();
 
   const datePickerRef = useRef<HTMLButtonElement>(null);
+
+  const volunteerGroupIdById = useMemo(() => {
+    const m = new Map<string, string>();
+    volunteers.forEach((v: any) => m.set(v.id, String(v.groupAffiliation || "")));
+    return m;
+  }, [volunteers]);
 
   // Add state for tracking attendance changes
   const [pendingAttendanceChanges, setPendingAttendanceChanges] = useState<{
@@ -260,6 +269,11 @@ const ManagerAppointments = () => {
 
         return matchesTab && matchesDateRange;
       })
+      .filter((appointment: any) => {
+        if (affiliationGroupId === 'all') return true;
+        const ids = Array.isArray(appointment.volunteerIds) ? appointment.volunteerIds : [];
+        return ids.some((p: any) => p?.type === 'volunteer' && volunteerGroupIdById.get(String(p.id)) === affiliationGroupId);
+      })
       .sort((a, b) => {
         const slotA = slots.find(s => s.id === a.calendarSlotId);
         const slotB = slots.find(s => s.id === b.calendarSlotId);
@@ -283,7 +297,7 @@ const ManagerAppointments = () => {
 
         return timeA - timeB;
       });
-  }, [appointments, slots, activeTab, dateRange]);
+  }, [appointments, slots, activeTab, dateRange, affiliationGroupId, volunteerGroupIdById]);
 
   // Handle tab change
   const handleTabChange = (value: string) => {
@@ -1172,7 +1186,16 @@ const ManagerAppointments = () => {
   }
 
   // Update the isLoading variable to be a const
-  const isLoading = appointmentsLoading || slotsLoading || groupsLoading || isUpdating || attendanceLoading || isAddingAttendance || isUpdatingAttendance || isMinLoading;
+  const isLoading =
+    appointmentsLoading ||
+    slotsLoading ||
+    externalGroupsLoading ||
+    affiliationGroupsLoading ||
+    isUpdating ||
+    attendanceLoading ||
+    isAddingAttendance ||
+    isUpdatingAttendance ||
+    isMinLoading;
 
   // Add back the handleDeleteAppointment function
   const handleDeleteAppointment = async (appointmentId: string) => {
@@ -1363,6 +1386,26 @@ const ManagerAppointments = () => {
                         />
                       </PopoverContent>
                     </Popover>
+                  </div>
+
+                  <div className="flex items-center">
+                    <Select
+                      value={affiliationGroupId}
+                      onValueChange={setAffiliationGroupId}
+                      dir={i18n.language === 'he' ? 'rtl' : 'ltr'}
+                    >
+                      <SelectTrigger className="w-[240px] bg-white hover:bg-slate-50 border-slate-300">
+                        <SelectValue placeholder={t('filters.affiliationGroup.placeholder')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t('filters.affiliationGroup.allGroups')}</SelectItem>
+                        {affiliationGroups.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            {g.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 

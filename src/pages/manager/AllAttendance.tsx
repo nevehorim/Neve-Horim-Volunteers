@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // Custom Components
 import ManagerSidebar from "@/components/manager/ManagerSidebar";
@@ -30,6 +31,7 @@ import { calendar_slotsRef, docToObject } from "@/services/firestore";
 // Hooks
 import { useAttendance } from "@/hooks/useAttendance";
 import { useVolunteers } from "@/hooks/useFirestoreVolunteers";
+import { useGroups } from "@/hooks/useFirestoreGroups";
 
 const MOBILE_BREAKPOINT = 1024;
 
@@ -70,12 +72,14 @@ export default function AllAttendance() {
   const [filter, setFilter] = useState<AttendanceFilter>("all");
   const [selectedDate, setSelectedDate] = useState(getTodayStr());
   const [search, setSearch] = useState("");
+  const [groupFilter, setGroupFilter] = useState<string>("all");
 
   const [slotsByAppointmentId, setSlotsByAppointmentId] = useState<Record<string, CalendarSlotLite>>({});
   const [slotsLoaded, setSlotsLoaded] = useState(false);
 
   const { attendance, loading: attendanceLoading, error: attendanceError } = useAttendance();
   const { volunteers } = useVolunteers();
+  const { groups } = useGroups();
 
   // Auth guard
   useEffect(() => {
@@ -124,6 +128,12 @@ export default function AllAttendance() {
     return m;
   }, [volunteers]);
 
+  const volunteerGroupIdById = useMemo(() => {
+    const m = new Map<string, string>();
+    volunteers.forEach((v) => m.set(v.id, String((v as any).groupAffiliation || "")));
+    return m;
+  }, [volunteers]);
+
   const rows = useMemo(() => {
     const locale = toLocale(language);
     const q = search.trim().toLowerCase();
@@ -168,13 +178,18 @@ export default function AllAttendance() {
       .filter((r) => (filter === "all" ? true : r.type === filter))
       .filter((r) => (selectedDate ? r.date === selectedDate : true))
       .filter((r) => {
+        if (groupFilter === "all") return true;
+        if (!r.volunteerId) return false;
+        return volunteerGroupIdById.get(String(r.volunteerId)) === groupFilter;
+      })
+      .filter((r) => {
         if (!q) return true;
         return (r.volunteerName || "").toLowerCase().includes(q) || (r.volunteerId || "").toLowerCase().includes(q);
       });
 
     filtered.sort((a, b) => (a.confirmedAt < b.confirmedAt ? 1 : -1));
     return filtered;
-  }, [attendance, filter, language, search, selectedDate, slotsByAppointmentId, t, volunteerNameById]);
+  }, [attendance, filter, groupFilter, language, search, selectedDate, slotsByAppointmentId, t, volunteerGroupIdById, volunteerNameById]);
 
   const onLogout = () => {
     localStorage.removeItem("user");
@@ -243,6 +258,22 @@ export default function AllAttendance() {
                     onChange={(e) => setSelectedDate(e.target.value)}
                     className="w-[180px]"
                   />
+                </div>
+
+                <div className={cn("flex items-center gap-2", isRTL && "flex-row-reverse")}>
+                  <Select value={groupFilter} onValueChange={setGroupFilter} dir={isRTL ? "rtl" : "ltr"}>
+                    <SelectTrigger className="w-[220px]">
+                      <SelectValue placeholder={t("groupFilter.placeholder")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t("groupFilter.allGroups")}</SelectItem>
+                      {groups.map((g) => (
+                        <SelectItem key={g.id} value={g.id}>
+                          {g.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className={cn("flex items-center gap-2 flex-1 min-w-[240px]", isRTL && "flex-row-reverse")}>

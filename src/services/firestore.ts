@@ -310,7 +310,8 @@ export interface Report {
   filters: {
     startDate: string;
     endDate: string;
-    subjectId?: string;
+    subjectId?: string | null;
+    groupId?: string | null;
   };
   data: {
     summary: {
