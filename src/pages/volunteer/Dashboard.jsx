@@ -108,6 +108,7 @@ const Dashboard = () => {
     totalSessions: 0,
     previousHours: 0
   });
+  const [facilityHours, setFacilityHours] = useState(0);
   const [upcomingSessions, setUpcomingSessions] = useState([]);
   const [recentActivity, setRecentActivity] = useState([]);
   const [volunteer, setVolunteer] = useState(null);
@@ -349,6 +350,145 @@ const Dashboard = () => {
       chunks.push(arr.slice(i, i + size));
     }
     return chunks;
+  };
+
+  const mergeIntervals = (intervals) => {
+    if (!intervals.length) return [];
+    const sorted = [...intervals].sort((a, b) => a.start - b.start);
+    const merged = [sorted[0]];
+
+    for (let i = 1; i < sorted.length; i++) {
+      const last = merged[merged.length - 1];
+      const current = sorted[i];
+      if (current.start <= last.end) {
+        last.end = Math.max(last.end, current.end);
+      } else {
+        merged.push({ ...current });
+      }
+    }
+    return merged;
+  };
+
+  const calculateOverlapMs = (start, end, mergedIntervals) => {
+    if (!mergedIntervals.length) return 0;
+    let overlap = 0;
+    for (const interval of mergedIntervals) {
+      if (interval.end <= start) continue;
+      if (interval.start >= end) break;
+      const s = Math.max(start, interval.start);
+      const e = Math.min(end, interval.end);
+      if (e > s) {
+        overlap += (e - s);
+      }
+    }
+    return Math.min(overlap, Math.max(0, end - start));
+  };
+
+  const fetchFacilityHours = async (volunteerId, appointmentHistory = []) => {
+    try {
+      if (!volunteerId) {
+        setFacilityHours(0);
+        return;
+      }
+
+      const attendanceCol = collection(db, 'attendance');
+
+      // Build session intervals (from appointmentHistory) that already count toward totalHours.
+      const sessionIntervals = [];
+      (appointmentHistory || []).forEach(entry => {
+        try {
+          if (!entry?.date || !entry?.startTime || !entry?.endTime) return;
+          if (entry.status === 'upcoming' || entry.status === 'canceled') return;
+          const startDate = parseTimeAndCombineWithDate(entry.date, entry.startTime);
+          const endDate = parseTimeAndCombineWithDate(entry.date, entry.endTime);
+          const startMs = startDate.getTime();
+          const endMs = endDate.getTime();
+          if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return;
+          sessionIntervals.push({ start: startMs, end: endMs });
+        } catch {
+          // Ignore malformed entries
+        }
+      });
+      const mergedSessionIntervals = mergeIntervals(sessionIntervals);
+      const q = query(
+        attendanceCol,
+        where('volunteerId.id', '==', volunteerId),
+        orderBy('confirmedAt', 'desc'),
+        limit(1000)
+      );
+
+      const snap = await getDocs(q);
+      const records = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(r => r.attendanceType === 'facility');
+
+      const now = nowMs();
+      let total = 0;
+
+      for (const r of records) {
+        const startMs = toMillisSafe(r.visitStartedAt || r.confirmedAt);
+        if (!startMs) continue;
+
+        const endMsRaw = toMillisSafe(r.visitEndedAt);
+        const endMs = endMsRaw || now;
+        if (!endMs || endMs <= startMs) continue;
+
+        const intervalMs = endMs - startMs;
+        const overlapMs = calculateOverlapMs(startMs, endMs, mergedSessionIntervals);
+        const nonOverlapMs = Math.max(0, intervalMs - overlapMs);
+
+        if (nonOverlapMs > 0) {
+          total += nonOverlapMs / (1000 * 60 * 60);
+        }
+      }
+
+      setFacilityHours(total);
+    } catch (error) {
+      console.error('Error calculating facility hours:', error);
+      setFacilityHours(0);
+    }
+  };
+
+  const fetchFacilityHours = async (volunteerId) => {
+    try {
+      if (!volunteerId) {
+        setFacilityHours(0);
+        return;
+      }
+
+      const attendanceCol = collection(db, 'attendance');
+      const q = query(
+        attendanceCol,
+        where('volunteerId.id', '==', volunteerId),
+        orderBy('confirmedAt', 'desc'),
+        limit(1000)
+      );
+
+      const snap = await getDocs(q);
+      const records = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(r => r.attendanceType === 'facility');
+
+      const now = nowMs();
+      let totalHours = 0;
+
+      for (const r of records) {
+        const startMs = toMillisSafe(r.visitStartedAt || r.confirmedAt);
+        if (!startMs) continue;
+
+        const endMsRaw = toMillisSafe(r.visitEndedAt);
+        const endMs = endMsRaw || now;
+
+        if (endMs > startMs) {
+          totalHours += (endMs - startMs) / (1000 * 60 * 60);
+        }
+      }
+
+      setFacilityHours(totalHours);
+    } catch (error) {
+      console.error('Error calculating facility hours:', error);
+      setFacilityHours(0);
+    }
   };
 
   // Realtime facility presence subscription (cross-device, stable key: auth userId)
@@ -802,10 +942,11 @@ const Dashboard = () => {
         const volunteerData = volunteerDoc.data();
 
         // Store the complete volunteer object for smart logging
-        setVolunteer({
+        const fullVolunteer = {
           id: volunteerDoc.id,
           ...volunteerData
-        });
+        };
+        setVolunteer(fullVolunteer);
 
         // Convert totalHours from minutes to hours if it's stored as minutes
         // Check if totalHours is likely in minutes (if it's > 24, it's probably minutes)
@@ -814,6 +955,8 @@ const Dashboard = () => {
         
         const rawPreviousHours = volunteerData.previousHours || 0;
         const previousHours = rawPreviousHours > 24 ? rawPreviousHours / 60 : rawPreviousHours;
+
+        await fetchFacilityHours(fullVolunteer.id, volunteerData.appointmentHistory || []);
 
         setUserData({
           name: volunteerData.fullName || username || t('dashboard.defaultName'),
@@ -1267,9 +1410,9 @@ const Dashboard = () => {
 
   // Update progress bars when data changes
   useEffect(() => {
-    if (userData.totalHours) {
+    if (effectiveTotalHours) {
       const maxHours = 200;
-      const value = Math.min(userData.totalHours, maxHours);
+      const value = Math.min(effectiveTotalHours, maxHours);
       const progressRatio = value / maxHours;
       const offset = 565.48 - (progressRatio * 565.48);
 
@@ -1278,7 +1421,7 @@ const Dashboard = () => {
         setAnimateHours(true);
       }, 200);
     }
-  }, [userData.totalHours]);
+  }, [effectiveTotalHours]);
 
   useEffect(() => {
     const timeInterval = setInterval(() => {
@@ -1313,7 +1456,8 @@ const Dashboard = () => {
     return t('dashboard.greeting.evening');
   };
 
-  const currentLevel = getLevel(userData.totalHours);
+  const effectiveTotalHours = (userData.totalHours || 0) + (facilityHours || 0);
+  const currentLevel = getLevel(effectiveTotalHours);
 
   if (loading) {
     return <LoadingScreen />;
@@ -1773,7 +1917,7 @@ const Dashboard = () => {
                       color: '#000000',
                       lineHeight: '1',
                       textShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
-                    }}>{userData.totalHours.toFixed(2).replace(/\.?0+$/, '')}</span>
+                    }}>{effectiveTotalHours.toFixed(2).replace(/\.?0+$/, '')}</span>
                     <span className="dash-hours-unit" style={{
                       fontSize: '1.25rem',
                       fontWeight: '600',
