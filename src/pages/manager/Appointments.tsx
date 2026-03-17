@@ -34,6 +34,7 @@ import { useUpdateAppointment } from "@/hooks/useFirestoreCalendar";
 import { AttendanceStatus, ParticipantId } from "@/services/firestore";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { format, startOfDay, endOfDay, isWithinInterval } from "date-fns";
+import { fromZonedTime } from "date-fns-tz";
 import { useAppointments, AppointmentUI } from "@/hooks/useFirestoreCalendar";
 import { AppointmentSkeleton } from "@/components/skeletons/AppointmentSkeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -43,6 +44,38 @@ import { useAttendanceByAppointment, useAddAttendance, useUpdateAttendance } fro
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { updateAppointmentStatusInHistory, incrementSessionStats, decrementSessionStats, updateVolunteerAttendanceStats, removeAppointmentFromHistory } from '@/services/engagement';
 import { Attendance } from '@/services/firestore';
+
+const TIMEZONE = 'Asia/Jerusalem';
+
+function toYYYYMMDD(dateStr: string): string {
+  if (!dateStr || typeof dateStr !== 'string') return dateStr;
+  const trimmed = dateStr.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const isoDatePart = trimmed.includes('T') ? trimmed.split('T')[0] : trimmed.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(isoDatePart)) return isoDatePart;
+  const d = new Date(trimmed);
+  if (isNaN(d.getTime())) return trimmed;
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function getSessionTimingInIsrael(date: string, startTime: string, endTime: string): 'past' | 'ongoing' | 'future' {
+  try {
+    const now = new Date();
+    const ymd = toYYYYMMDD(date);
+    const startPart = startTime.length >= 5 ? startTime.slice(0, 5) : startTime;
+    const endPart = endTime.length >= 5 ? endTime.slice(0, 5) : endTime;
+    const sessionStart = fromZonedTime(`${ymd}T${startPart}:00`, TIMEZONE);
+    const sessionEnd = fromZonedTime(`${ymd}T${endPart}:00`, TIMEZONE);
+    if (sessionEnd <= now) return 'past';
+    if (sessionStart <= now && sessionEnd > now) return 'ongoing';
+    return 'future';
+  } catch {
+    return 'future';
+  }
+}
 
 const ManagerAppointments = () => {
   const navigate = useNavigate();
@@ -73,6 +106,7 @@ const ManagerAppointments = () => {
   // Modal state
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<AppointmentUI | null>(null);
+  const [isRecalculatingStatus, setIsRecalculatingStatus] = useState(false);
   const [isAttendanceDialogOpen, setIsAttendanceDialogOpen] = useState(false);
 
   // Get attendance data for selected appointment
@@ -482,7 +516,7 @@ const ManagerAppointments = () => {
             if (v.type === 'volunteer') {
               await incrementSessionStats(v.id, duration, 'volunteer');
               await updateVolunteerAttendanceStats(v.id, 'present');
-              // Recreate attendance record
+              // Recreate attendance record (session-based, with full-session interval)
               await addAttendance({
                 appointmentId: appointment.id,
                 volunteerId: {
@@ -491,7 +525,11 @@ const ManagerAppointments = () => {
                 },
                 status: 'present',
                 notes: 'Automatically marked as present for past session',
-                confirmedBy: 'manager'
+                confirmedBy: 'manager',
+                source: 'session',
+                // For resurrected past sessions, treat the whole slot as the attended interval
+                checkInAt: Timestamp.fromDate(new Date(slot.date + 'T' + slot.startTime + ':00')),
+                effectiveEndAt: Timestamp.fromDate(new Date(slot.date + 'T' + slot.endTime + ':00'))
               });
             }
             if (v.type === 'external_group') {
@@ -504,7 +542,10 @@ const ManagerAppointments = () => {
                 },
                 status: 'present',
                 notes: 'Automatically marked as present for past session (external group)',
-                confirmedBy: 'manager'
+                confirmedBy: 'manager',
+                source: 'session',
+                checkInAt: Timestamp.fromDate(new Date(slot.date + 'T' + slot.startTime + ':00')),
+                effectiveEndAt: Timestamp.fromDate(new Date(slot.date + 'T' + slot.endTime + ':00'))
               });
             }
           }
@@ -563,6 +604,53 @@ const ManagerAppointments = () => {
       });
     } finally {
       setIsSavingDetails(false);
+    }
+  };
+
+  // Recalculate status from session date/time in Israel time (fixes wrong "Completed" before session starts)
+  const handleRecalculateStatus = async () => {
+    if (!selectedAppointment) return;
+    const slot = slots.find(s => s.id === selectedAppointment.calendarSlotId);
+    if (!slot) {
+      toast({ title: t('messages.error'), description: 'Slot not found', variant: 'destructive' });
+      return;
+    }
+    setIsRecalculatingStatus(true);
+    try {
+      const timing = getSessionTimingInIsrael(slot.date, slot.startTime, slot.endTime);
+      const newStatus: AppointmentStatus =
+        timing === 'past' ? 'completed' : timing === 'ongoing' ? 'inProgress' : 'upcoming';
+
+      const now = new Date();
+      await updateAppointment(selectedAppointment.id, {
+        status: newStatus,
+        updatedAt: Timestamp.fromDate(now)
+      });
+
+      const slotRef = doc(db, 'calendar_slots', selectedAppointment.calendarSlotId);
+      const slotStatus = newStatus === 'completed' ? 'full' : newStatus === 'inProgress' ? 'full' : 'open';
+      const isOpen = newStatus === 'upcoming';
+      await updateDoc(slotRef, { status: slotStatus, isOpen, updatedAt: Timestamp.fromDate(now) });
+
+      for (const v of selectedAppointment.volunteerIds) {
+        if (v.type === 'volunteer') {
+          await updateAppointmentStatusInHistory(v.id, selectedAppointment.id, newStatus, 'volunteer');
+        }
+      }
+      for (const rId of selectedAppointment.residentIds) {
+        await updateAppointmentStatusInHistory(rId, selectedAppointment.id, newStatus, 'resident');
+      }
+
+      setSelectedAppointment(prev => prev ? { ...prev, status: newStatus, updatedAt: now.toISOString() } : null);
+      toast({
+        title: t('messages.appointmentUpdated'),
+        description: t('messages.appointmentUpdatedDescription')
+      });
+    } catch (error) {
+      console.error('Recalculate status error:', error);
+      toast({ title: t('messages.error'), description: t('messages.errorDescription'), variant: 'destructive' });
+    } finally {
+      setIsRecalculatingStatus(false);
     }
   };
 
@@ -710,12 +798,22 @@ const ManagerAppointments = () => {
           } else {
             // Update existing attendance record
             const prevStatus = existingAttendance.status;
-            const updatePromise = updateAttendance(existingAttendance.id, {
+            const updatePayload: any = {
               status: changes.status,
               notes: changes.notes || null,
               volunteerId: changes.volunteerId,
-              confirmedBy: 'manager'
-            });
+              confirmedBy: 'manager',
+              // Always mark as session-based attendance from the manager UI
+              source: 'session',
+              appointmentId: selectedAppointment.id
+            };
+            // When transitioning into a present/late state and we don't yet
+            // have a timing interval, start it now.
+            if ((changes.status === 'present' || changes.status === 'late') &&
+              !existingAttendance.checkInAt) {
+              updatePayload.checkInAt = Timestamp.now();
+            }
+            const updatePromise = updateAttendance(existingAttendance.id, updatePayload);
 
             // Handle stats updates for upcoming/inProgress/completed appointments
             if (selectedAppointment.status === 'upcoming' || selectedAppointment.status === 'inProgress' || selectedAppointment.status === 'completed') {
@@ -841,13 +939,20 @@ const ManagerAppointments = () => {
           }
         } else if (changes.status !== null) {
           // Create new attendance record only if status is not null
-          const addPromise = addAttendance({
+          const baseData: any = {
             appointmentId: selectedAppointment.id,
             volunteerId: changes.volunteerId,
             status: changes.status,
             notes: changes.notes || null,
-            confirmedBy: 'manager'
-          });
+            confirmedBy: 'manager',
+            // Mark as session-based attendance
+            source: 'session'
+          };
+          // For present/late, start timing interval now
+          if (changes.status === 'present' || changes.status === 'late') {
+            baseData.checkInAt = Timestamp.now();
+          }
+          const addPromise = addAttendance(baseData);
 
           // For upcoming/inProgress/completed appointments, increment stats when marking present/late
           if ((selectedAppointment.status === 'upcoming' || selectedAppointment.status === 'inProgress' || selectedAppointment.status === 'completed') &&
@@ -972,13 +1077,11 @@ const ManagerAppointments = () => {
     ? externalGroups.find(g => g.id === selectedAppointment.volunteerIds.find(v => v.type === 'external_group')?.id)
     : null;
 
-  // Function to check and update appointment statuses
+  // Function to check and update appointment statuses (uses Israel timezone)
   const checkAndUpdateAppointmentStatuses = useCallback(async () => {
     if (!appointments.length || !slots.length) return;
 
     const now = new Date();
-    const currentTime = now.getHours() * 60 + now.getMinutes(); // Convert to minutes for easier comparison
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     // Only run if enough time has passed since last check
     if (now.getTime() - lastStatusCheckRef.current < STATUS_CHECK_INTERVAL) {
@@ -994,62 +1097,24 @@ const ManagerAppointments = () => {
           const slot = slots.find(s => s.id === appointment.calendarSlotId);
           if (!slot) return false;
 
-          const appointmentDate = new Date(slot.date);
-          const isToday = appointmentDate.toDateString() === today.toDateString();
-          const isPast = appointmentDate < today;
+          const timing = getSessionTimingInIsrael(slot.date, slot.startTime, slot.endTime);
+          const expectedStatus: AppointmentStatus =
+            timing === 'past' ? 'completed' : timing === 'ongoing' ? 'inProgress' : 'upcoming';
 
-          // Convert slot times to minutes for comparison
-          const [startHour, startMinute] = slot.startTime.split(':').map(Number);
-          const [endHour, endMinute] = slot.endTime.split(':').map(Number);
-          const startTimeInMinutes = startHour * 60 + startMinute;
-          const endTimeInMinutes = endHour * 60 + endMinute;
-
-          // For past appointments, they should be marked as completed
-          if (isPast && appointment.status !== 'completed' && appointment.status !== 'canceled') {
-            return true;
-          }
-
-          // For today's appointments, check time-based status
-          if (isToday) {
-            if (appointment.status === 'upcoming' && currentTime >= startTimeInMinutes) {
-              return true; // Needs update to 'inProgress'
-            }
-            if (appointment.status === 'inProgress' && currentTime >= endTimeInMinutes) {
-              return true; // Needs update to 'completed'
-            }
-            if ((appointment.status === 'inProgress' || appointment.status === 'completed') &&
-              currentTime < startTimeInMinutes) {
-              return true; // Needs update to 'upcoming'
-            }
-          }
-
-          return false;
+          if (appointment.status === 'canceled') return false;
+          return appointment.status !== expectedStatus;
         })
         .map(async appointment => {
           const slot = slots.find(s => s.id === appointment.calendarSlotId);
           if (!slot) return;
 
-          const appointmentDate = new Date(slot.date);
-          const isToday = appointmentDate.toDateString() === today.toDateString();
-          const isPast = appointmentDate < today;
+          const timing = getSessionTimingInIsrael(slot.date, slot.startTime, slot.endTime);
+          const newStatus: AppointmentStatus =
+            timing === 'past' ? 'completed' : timing === 'ongoing' ? 'inProgress' : 'upcoming';
 
           const [startHour, startMinute] = slot.startTime.split(':').map(Number);
           const [endHour, endMinute] = slot.endTime.split(':').map(Number);
-          const startTimeInMinutes = startHour * 60 + startMinute;
-          const endTimeInMinutes = endHour * 60 + endMinute;
-          const currentTime = now.getHours() * 60 + now.getMinutes();
           const duration = (endHour + endMinute / 60) - (startHour + startMinute / 60);
-
-          let newStatus: AppointmentStatus;
-          if (isPast) {
-            newStatus = 'completed';
-          } else if (currentTime >= endTimeInMinutes) {
-            newStatus = 'completed';
-          } else if (currentTime >= startTimeInMinutes) {
-            newStatus = 'inProgress';
-          } else {
-            newStatus = 'upcoming';
-          }
 
           // Only update if status is different
           if (newStatus !== appointment.status) {
@@ -1093,10 +1158,34 @@ const ManagerAppointments = () => {
               await updateAppointmentStatusInHistory(rId, appointment.id, newStatus, 'resident');
             }
 
-            // Process volunteer self-reported attendance when status changes to completed
+            // When a session is completed, finalize attendance intervals and process volunteer self-reported stats
             if (newStatus === 'completed') {
               try {
                 const attendanceRecords = await getAttendanceByAppointment(appointment.id);
+                // Finalize timing for all session-based present/late records that don't yet have an effectiveEndAt
+                const ymd = toYYYYMMDD(slot.date);
+                const sessionStart = fromZonedTime(`${ymd}T${slot.startTime.slice(0, 5)}:00`, TIMEZONE);
+                const sessionEnd = fromZonedTime(`${ymd}T${slot.endTime.slice(0, 5)}:00`, TIMEZONE);
+                const timingUpdates = attendanceRecords
+                  .filter(record =>
+                    (record.status === 'present' || record.status === 'late') &&
+                    !record.effectiveEndAt
+                  )
+                  .map(async record => {
+                    const ref = doc(db, 'attendance', record.id);
+                    const payload: any = {
+                      effectiveEndAt: Timestamp.fromDate(sessionEnd),
+                      source: record.source || 'session',
+                      appointmentId: appointment.id
+                    };
+                    if (!record.checkInAt) {
+                      payload.checkInAt = Timestamp.fromDate(sessionStart);
+                    }
+                    await updateDoc(ref, payload);
+                  });
+                await Promise.all(timingUpdates);
+
+                // Process volunteer self-reported attendance when status changes to completed
                 const volunteerAttendanceRecords = attendanceRecords.filter(record => 
                   record.confirmedBy === 'volunteer' && 
                   record.volunteerId.type === 'volunteer'
@@ -1162,6 +1251,15 @@ const ManagerAppointments = () => {
     const interval = setInterval(checkAndUpdateAppointmentStatuses, STATUS_CHECK_INTERVAL);
     return () => clearInterval(interval);
   }, [checkAndUpdateAppointmentStatuses]);
+
+  // Keep details modal in sync when appointment is updated by status check (e.g. corrected to "upcoming")
+  useEffect(() => {
+    if (!isDetailsDialogOpen || !selectedAppointment) return;
+    const latest = appointments.find(a => a.id === selectedAppointment.id);
+    if (latest && latest.status !== selectedAppointment.status) {
+      setSelectedAppointment(latest);
+    }
+  }, [appointments, isDetailsDialogOpen, selectedAppointment?.id]);
 
   // Utility for visually hidden class
   const srOnly = "sr-only";
@@ -1563,8 +1661,8 @@ const ManagerAppointments = () => {
           setDetailsTab('details');
         }
       }}>
-        <DialogContent className="sm:max-w-[600px] max-h-[80vh] flex flex-col" dir={i18n.language === 'he' ? 'rtl' : 'ltr'}>
-          <DialogHeader className="border-b border-slate-300 pb-3" dir={i18n.language === 'he' ? 'rtl' : 'ltr'}>
+        <DialogContent className="sm:max-w-[600px] max-h-[85vh] flex flex-col overflow-hidden" dir={i18n.language === 'he' ? 'rtl' : 'ltr'}>
+          <DialogHeader className="flex-shrink-0 border-b border-slate-300 pb-3" dir={i18n.language === 'he' ? 'rtl' : 'ltr'}>
             <DialogTitle className="text-slate-900">{t('details.title')}</DialogTitle>
             <DialogDescription className="text-slate-500">
               {t('details.description')}
@@ -1572,7 +1670,7 @@ const ManagerAppointments = () => {
           </DialogHeader>
 
           {selectedAppointment && (
-            <div className="overflow-y-auto flex-1 px-2 pr-3 pt-4 pb-4">
+            <div className="overflow-y-auto flex-1 min-h-0 px-2 pr-3 pt-4 pb-4">
               <div className="space-y-6">
                 {/* Session Details Card (restyled, with mini-cards) */}
                 <div className="space-y-4 bg-white rounded-lg p-6 border border-slate-300 shadow-sm">
@@ -1752,7 +1850,22 @@ const ManagerAppointments = () => {
             </div>
           )}
 
-          <DialogFooter className="border-t border-slate-300 pt-5 flex justify-center items-center">
+          <DialogFooter className="flex-shrink-0 border-t border-slate-300 pt-4 pb-1 flex flex-wrap gap-2 justify-center items-center bg-white">
+            <Button
+              variant="outline"
+              onClick={handleRecalculateStatus}
+              disabled={isRecalculatingStatus}
+              className="flex-1 sm:flex-none min-w-[140px] bg-slate-50 border-slate-300 hover:bg-slate-100"
+            >
+              {isRecalculatingStatus ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-slate-600 mr-2 inline-block" />
+                  {t('actions.recalculating')}
+                </>
+              ) : (
+                t('actions.recalculateStatus')
+              )}
+            </Button>
             <Button
               onClick={async () => {
                 if (!selectedAppointment) return;
@@ -1761,10 +1874,8 @@ const ManagerAppointments = () => {
                   if (Object.keys(pendingDetailsChanges).length > 0) {
                     const newStatus = pendingDetailsChanges.status || selectedAppointment.status;
                     const newNotes = pendingDetailsChanges.notes !== undefined ? pendingDetailsChanges.notes || '' : selectedAppointment.notes;
-                    // Use the robust status change handler
                     await handleStatusChange(selectedAppointment.id, newStatus, newNotes);
                   }
-                  // Reset all pending changes
                   setPendingDetailsChanges({});
                 } catch (error) {
                   toast({
@@ -1777,7 +1888,7 @@ const ManagerAppointments = () => {
                 }
               }}
               disabled={isSavingDetails || Object.keys(pendingDetailsChanges).length === 0}
-              className="w-[200px] transition-all duration-200 mx-auto"
+              className="flex-1 sm:flex-none min-w-[120px] transition-all duration-200"
             >
               {isSavingDetails ? (
                 <>
@@ -1787,6 +1898,13 @@ const ManagerAppointments = () => {
               ) : (
                 t('actions.saveChanges')
               )}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setIsDetailsDialogOpen(false)}
+              className="flex-1 sm:flex-none min-w-[100px] border-slate-300"
+            >
+              {t('common:common.close')}
             </Button>
           </DialogFooter>
         </DialogContent>

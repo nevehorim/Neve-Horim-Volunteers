@@ -79,6 +79,44 @@
   transform: translateY(0);
 }
 
+.login-divider {
+  display: flex;
+  align-items: center;
+  margin: 1rem 0;
+  gap: 0.75rem;
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(74, 85, 104, 0.3);
+}
+
+.login-divider span {
+  font-size: 0.875rem;
+  color: #718096;
+}
+
+.login-button-google {
+  background: #fff;
+  color: #1f2937;
+  border: 1px solid #d1d5db;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.login-button-google:hover,
+.login-button-google:focus {
+  background: #f9fafb;
+  border-color: #9ca3af;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.login-button-google::before {
+  display: none;
+}
+
 .login-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;

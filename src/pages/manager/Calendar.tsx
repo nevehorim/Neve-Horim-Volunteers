@@ -30,7 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/use-toast";
 import { Textarea } from "@/components/ui/textarea";
-import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
+import { formatInTimeZone, fromZonedTime, toZonedTime } from 'date-fns-tz';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -113,39 +113,30 @@ const isSlotInPast = (slot: CalendarSlotUI): boolean => {
   return slotDate < today;
 };
 
-// Helper to determine session timing
+// Helper to determine session timing (date/time interpreted in Israel timezone)
 const getSessionTiming = (date: string, startTime: string, endTime: string) => {
-  const now = toIsraelTime(new Date());
-  const sessionDate = toIsraelTime(date);
-  const [startHour, startMinute] = startTime.split(":").map(Number);
-  const [endHour, endMinute] = endTime.split(":").map(Number);
-  const sessionStart = new Date(sessionDate);
-  sessionStart.setHours(startHour, startMinute, 0, 0);
-  const sessionEnd = new Date(sessionDate);
-  sessionEnd.setHours(endHour, endMinute, 0, 0);
+  const now = new Date();
+  const startStr = `${date}T${startTime.length >= 5 ? startTime.slice(0, 5) : startTime}:00`;
+  const endStr = `${date}T${endTime.length >= 5 ? endTime.slice(0, 5) : endTime}:00`;
+  const sessionStart = fromZonedTime(startStr, TIMEZONE);
+  const sessionEnd = fromZonedTime(endStr, TIMEZONE);
 
-  if (sessionEnd < now) return "past";
+  if (sessionEnd <= now) return "past";
   if (sessionStart <= now && sessionEnd > now) return "ongoing";
   return "future";
 };
 
-// Add this helper function near the other utility functions
 const isSessionInPast = (date: string, startTime: string): boolean => {
-  const now = toIsraelTime(new Date());
-  const sessionDate = toIsraelTime(date);
-  const [startHour, startMinute] = startTime.split(":").map(Number);
-  const sessionStart = new Date(sessionDate);
-  sessionStart.setHours(startHour, startMinute, 0, 0);
+  const now = new Date();
+  const startStr = `${date}T${startTime.length >= 5 ? startTime.slice(0, 5) : startTime}:00`;
+  const sessionStart = fromZonedTime(startStr, TIMEZONE);
   return sessionStart < now;
 };
 
-// Add this helper function near the other utility functions
 const isSessionEndInPast = (date: string, endTime: string): boolean => {
-  const now = toIsraelTime(new Date());
-  const sessionDate = toIsraelTime(date);
-  const [endHour, endMinute] = endTime.split(":").map(Number);
-  const sessionEnd = new Date(sessionDate);
-  sessionEnd.setHours(endHour, endMinute, 0, 0);
+  const now = new Date();
+  const endStr = `${date}T${endTime.length >= 5 ? endTime.slice(0, 5) : endTime}:00`;
+  const sessionEnd = fromZonedTime(endStr, TIMEZONE);
   return sessionEnd < now;
 };
 

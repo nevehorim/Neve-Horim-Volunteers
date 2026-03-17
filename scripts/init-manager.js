@@ -11,7 +11,7 @@
 
 import readline from 'readline';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, query, where, getDocs, Timestamp } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator, collection, addDoc, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import crypto from 'crypto';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -72,6 +72,14 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+
+// In local development, optionally connect to the Firestore emulator.
+// Controlled by VITE_USE_EMULATORS so production usage is unaffected.
+if (process.env.VITE_USE_EMULATORS === 'true') {
+  const host = process.env.FIRESTORE_EMULATOR_HOST?.split(':')[0] || 'localhost';
+  const port = Number(process.env.FIRESTORE_EMULATOR_HOST?.split(':')[1]) || 8080;
+  connectFirestoreEmulator(db, host, port);
+}
 
 // Create readline interface for user input
 const rl = readline.createInterface({
@@ -139,6 +147,16 @@ const validatePassword = (password) => {
   if (password.length > 128) {
     return 'Password must be less than 128 characters';
   }
+  return null;
+};
+
+// Optional email for Google sign-in (empty string allowed)
+const validateEmailOptional = (email) => {
+  if (!email || email.trim() === '') return null;
+  const trimmed = email.trim();
+  if (trimmed.length > 254) return 'Email is too long';
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(trimmed)) return 'Please enter a valid email address';
   return null;
 };
 
@@ -268,6 +286,12 @@ const createManagerAccount = async () => {
       validateFullName
     );
 
+    const emailInput = await getInput(
+      'Email for Google sign-in (optional, press Enter to skip): ',
+      validateEmailOptional
+    );
+    const email = emailInput && emailInput.trim() ? emailInput.trim() : null;
+
     log('\nPassword Requirements:');
     log('   • At least 8 characters long');
     log('   • Can contain letters, numbers, and special characters');
@@ -290,6 +314,7 @@ const createManagerAccount = async () => {
     log('='.repeat(60), colors.cyan);
     log(`Username: ${username}`);
     log(`Full Name: ${fullName}`);
+    if (email) log(`Email (Google sign-in): ${email}`);
     log(`Password: ${'*'.repeat(password.length)}`);
     log(`Role: Manager`);
     log(`Status: Active`);
@@ -316,6 +341,9 @@ const createManagerAccount = async () => {
       isActive: true,
       createdAt: Timestamp.now()
     };
+    if (email) {
+      newManager.email = email;
+    }
 
     const usersRef = collection(db, 'users');
     const docRef = await addDoc(usersRef, newManager);

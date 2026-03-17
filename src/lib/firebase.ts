@@ -1,7 +1,7 @@
-import { getAuth } from "firebase/auth";
+import { getAuth, connectAuthEmulator } from "firebase/auth";
 import { initializeApp } from "firebase/app";
 import { getStorage } from "firebase/storage";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 
 // Web app's Firebase configuration
 const firebaseConfig = {
@@ -10,7 +10,7 @@ const firebaseConfig = {
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 // Initialize Firebase
@@ -21,4 +21,12 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 
-export default app; 
+// In local development, optionally use Firebase emulators instead of the real backend.
+// Controlled by VITE_USE_EMULATORS so production builds are unaffected.
+if (import.meta.env.DEV && import.meta.env.VITE_USE_EMULATORS === "true") {
+  // Use the ports printed by `firebase emulators:start` if different
+  connectFirestoreEmulator(db, "localhost", 8080);
+  connectAuthEmulator(auth, "http://localhost:9099");
+}
+
+export default app;

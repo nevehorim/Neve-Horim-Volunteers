@@ -25,6 +25,8 @@
     "trackAttendance": "Track Attendance",
     "saveChanges": "Save Changes",
     "saving": "Saving...",
+    "recalculateStatus": "Recalculate status (Israel time)",
+    "recalculating": "Recalculating...",
     "deleteAppointment": "Delete Appointment",
     "deleting": "Deleting..."
   },

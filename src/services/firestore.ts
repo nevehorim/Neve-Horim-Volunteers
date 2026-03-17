@@ -16,6 +16,8 @@ export interface User {
   role: 'manager' | 'volunteer';
   isActive: boolean;
   createdAt: Timestamp;
+  /** Optional: used for Google sign-in; user is looked up by this email */
+  email?: string;
 }
 
 // VOLUNTEERS
@@ -227,6 +229,8 @@ export interface Appointment {
 export type AttendanceStatus = 'present' | 'absent' | 'late';
 export type AttendanceConfirmedBy = 'volunteer' | 'manager';
 export type AttendanceType = 'appointment' | 'facility';
+// New unified source for presence: session-linked, walk-in, or legacy facility migration.
+export type AttendanceSource = 'session' | 'walkIn' | 'legacyFacility';
 export interface Attendance {
   id: string;
   /**
@@ -243,11 +247,28 @@ export interface Attendance {
   confirmedBy: AttendanceConfirmedBy;
   confirmedAt: Timestamp;
   /**
+   * High-fidelity timing for both sessions and walk-ins.
+   * - checkInAt: when the volunteer actually arrived.
+   * - checkOutAt: explicit early checkout time (if they left before the natural end).
+   * - effectiveEndAt: the interval end used for reporting (either checkOutAt or session end).
+   */
+  checkInAt?: Timestamp | null;
+  checkOutAt?: Timestamp | null;
+  effectiveEndAt?: Timestamp | null;
+  /**
+   * How this attendance record was created.
+   * - 'session': derived from a scheduled appointment.
+   * - 'walkIn': ad-hoc facility visit with no appointment.
+   * - 'legacyFacility': migrated from the old facility_presence flow.
+   */
+  source?: AttendanceSource;
+  /**
    * Optional date (YYYY-MM-DD). Used mainly for facility attendance/history grouping.
    */
   date?: string;
   /**
    * Optional timestamps for facility check-in/out.
+   * Kept for backward compatibility; new code should prefer checkInAt/checkOutAt/effectiveEndAt.
    */
   visitStartedAt?: Timestamp | null;
   visitEndedAt?: Timestamp | null;

@@ -108,6 +108,9 @@ const Dashboard = () => {
     totalSessions: 0,
     previousHours: 0
   });
+  const [facilityHours, setFacilityHours] = useState(0);
+  /** Total hours derived from attendance collection (present/late); null until computed */
+  const [attendanceTotalHours, setAttendanceTotalHours] = useState(null);
   const [upcomingSessions, setUpcomingSessions] = useState([]);
   const [recentActivity, setRecentActivity] = useState([]);
   const [volunteer, setVolunteer] = useState(null);
@@ -221,6 +224,20 @@ const Dashboard = () => {
       colorPresets[2], // Calm green for Sessions Completed  
       colorPresets[3]  // Warm amber for Current Level
     ];
+  };
+
+  // Hours between two time strings (e.g. "09:00", "11:30") in decimal hours
+  const getHoursFromTimeRange = (startTime, endTime) => {
+    if (!startTime || !endTime) return 0;
+    try {
+      const [sh, sm] = String(startTime).trim().split(':').map(Number);
+      const [eh, em] = String(endTime).trim().split(':').map(Number);
+      const startMins = (sh || 0) * 60 + (sm || 0);
+      const endMins = (eh || 0) * 60 + (em || 0);
+      return Math.max(0, (endMins - startMins) / 60);
+    } catch {
+      return 0;
+    }
   };
 
   // Helper function to parse time string and combine with date
@@ -351,37 +368,142 @@ const Dashboard = () => {
     return chunks;
   };
 
-  // Realtime facility presence subscription (cross-device, stable key: auth userId)
-  useEffect(() => {
-    if (!authUserId) return;
-
-    setFacilityAttendance(prev => ({ ...prev, loading: true }));
-    const presenceRef = doc(db, 'facility_presence', authUserId);
-
-    const unsubscribe = onSnapshot(
-      presenceRef,
-      (snap) => {
-        const data = snap.data();
-        const isIn = data?.status === 'in';
-        const startedAt = data?.startedAt || null;
-        const attendanceId = data?.attendanceId || null;
-
-        setFacilityAttendance({
-          loading: false,
-          checkedIn: Boolean(isIn),
-          record: isIn
-            ? { id: attendanceId, visitStartedAt: startedAt, confirmedAt: startedAt }
-            : null
-        });
-      },
-      (error) => {
-        console.error('Error subscribing to facility presence:', error);
-        setFacilityAttendance(prev => ({ ...prev, loading: false }));
+  // Total hours = session hours + facility-only hours (overlap counted once).
+  // - Session hours: from volunteer doc (totalHours / totalSessions), updated when sessions are completed.
+  // - Facility hours: from attendance collection (attendanceType === 'facility'), visitStartedAt → visitEndedAt.
+  //   Overlap with session intervals (from appointmentHistory) is subtracted so the same time is not double-counted.
+  const mergeIntervals = (intervals) => {
+    if (!intervals.length) return [];
+    const sorted = [...intervals].sort((a, b) => a.start - b.start);
+    const merged = [sorted[0]];
+    for (let i = 1; i < sorted.length; i++) {
+      const last = merged[merged.length - 1];
+      const current = sorted[i];
+      if (current.start <= last.end) {
+        last.end = Math.max(last.end, current.end);
+      } else {
+        merged.push({ ...current });
       }
-    );
+    }
+    return merged;
+  };
 
-    return () => unsubscribe();
-  }, [authUserId]);
+  const calculateOverlapMs = (start, end, mergedIntervals) => {
+    if (!mergedIntervals.length) return 0;
+    let overlap = 0;
+    for (const interval of mergedIntervals) {
+      if (interval.end <= start) continue;
+      if (interval.start >= end) break;
+      const s = Math.max(start, interval.start);
+      const e = Math.min(end, interval.end);
+      if (e > s) overlap += (e - s);
+    }
+    return Math.min(overlap, Math.max(0, end - start));
+  };
+
+  const fetchFacilityHours = async (volunteerId, appointmentHistory = []) => {
+    try {
+      if (!volunteerId) {
+        setFacilityHours(0);
+        return;
+      }
+      const attendanceCol = collection(db, 'attendance');
+      const sessionIntervals = [];
+      (appointmentHistory || []).forEach(entry => {
+        try {
+          if (!entry?.date || !entry?.startTime || !entry?.endTime) return;
+          if (entry.status === 'upcoming' || entry.status === 'canceled') return;
+          const startDate = parseTimeAndCombineWithDate(entry.date, entry.startTime);
+          const endDate = parseTimeAndCombineWithDate(entry.date, entry.endTime);
+          const startMs = startDate.getTime();
+          const endMs = endDate.getTime();
+          if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return;
+          sessionIntervals.push({ start: startMs, end: endMs });
+        } catch {
+          // ignore
+        }
+      });
+      const mergedSessionIntervals = mergeIntervals(sessionIntervals);
+      const q = query(
+        attendanceCol,
+        where('volunteerId.id', '==', volunteerId),
+        orderBy('confirmedAt', 'desc'),
+        limit(1000)
+      );
+      const snap = await getDocs(q);
+      const records = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        // Facility / walk-in style visits only (no appointmentId)
+        .filter(r =>
+          (!r.appointmentId && (r.source === 'walkIn' || r.attendanceType === 'facility'))
+        );
+      const now = nowMs();
+      let total = 0;
+      for (const r of records) {
+        // Prefer new timing fields; fall back to legacy visitStartedAt/confirmedAt
+        const startMs = toMillisSafe(r.checkInAt || r.visitStartedAt || r.confirmedAt);
+        if (!startMs) continue;
+        const endMsRaw = toMillisSafe(r.effectiveEndAt || r.checkOutAt || r.visitEndedAt);
+        const endMs = endMsRaw || now;
+        if (!endMs || endMs <= startMs) continue;
+        const intervalMs = endMs - startMs;
+        const overlapMs = calculateOverlapMs(startMs, endMs, mergedSessionIntervals);
+        const nonOverlapMs = Math.max(0, intervalMs - overlapMs);
+        if (nonOverlapMs > 0) total += nonOverlapMs / (1000 * 60 * 60);
+      }
+      setFacilityHours(total);
+    } catch (error) {
+      console.error('Error calculating facility hours:', error);
+      setFacilityHours(0);
+    }
+  };
+
+  // Total hours from attendance collection (appointment + facility, present/late only). Used for "Total Hours Since Joining".
+  const fetchAttendanceTotalHours = async (volunteerId, appointmentHistory = []) => {
+    try {
+      if (!volunteerId) {
+        setAttendanceTotalHours(0);
+        return;
+      }
+      const attendanceCol = collection(db, 'attendance');
+      const q = query(
+        attendanceCol,
+        where('volunteerId.id', '==', volunteerId)
+      );
+      const snap = await getDocs(q);
+      const records = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(r => r.status === 'present' || r.status === 'late');
+
+      let totalHours = 0;
+      const nowMs = () => Date.now();
+
+      for (const r of records) {
+        const startMs = toMillisSafe(r.checkInAt || r.visitStartedAt || r.confirmedAt);
+        if (!startMs) continue;
+        const endMsRaw = toMillisSafe(r.effectiveEndAt || r.checkOutAt || r.visitEndedAt);
+        const endMs = endMsRaw || nowMs();
+        if (!endMs || endMs <= startMs) continue;
+        const intervalMs = endMs - startMs;
+        totalHours += intervalMs / (1000 * 60 * 60);
+      }
+
+      setAttendanceTotalHours(totalHours);
+    } catch (error) {
+      console.error('Error calculating attendance total hours:', error);
+      setAttendanceTotalHours(null);
+    }
+  };
+
+  // Declare before any useEffect that might reference them (avoids "Cannot access before initialization")
+  // Prefer attendance-based total when available so "Total Hours Since Joining" reflects actual attendance.
+  const effectiveTotalHours = attendanceTotalHours !== null
+    ? attendanceTotalHours
+    : (userData.totalHours || 0) + (facilityHours || 0);
+  const currentLevel = getLevel(effectiveTotalHours);
+
+  // Facility presence is now driven purely from the local attendance records that this page writes.
+  // Cross-device realtime presence via `facility_presence` has been deprecated.
 
   const fetchTodayAppointmentAttendance = async () => {
     if (!volunteer?.id) return;
@@ -469,13 +591,19 @@ const Dashboard = () => {
       const attendanceCol = collection(db, 'attendance');
 
       const attendanceData = {
-        attendanceType: 'facility',
+        // New unified walk-in model
+        source: 'walkIn',
         appointmentId: null,
         date: todayStr,
         volunteerId: { id: volunteer.id, type: 'volunteer' },
         status: 'present',
         confirmedBy: 'volunteer',
         confirmedAt: now,
+        checkInAt: now,
+        checkOutAt: null,
+        effectiveEndAt: null,
+        // Legacy fields kept for backward-compat views
+        attendanceType: 'facility',
         visitStartedAt: now,
         visitEndedAt: null,
         notes: `Facility check-in by volunteer at ${new Date().toLocaleTimeString()}`
@@ -487,23 +615,6 @@ const Dashboard = () => {
         record: { id: docRef.id, ...attendanceData },
         checkedIn: true
       });
-
-      if (authUserId) {
-        const presenceRef = doc(db, 'facility_presence', authUserId);
-        await setDoc(
-          presenceRef,
-          {
-            userId: authUserId,
-            volunteerDocId: volunteer.id,
-            attendanceId: docRef.id,
-            status: 'in',
-            startedAt: now,
-            endedAt: null,
-            updatedAt: now
-          },
-          { merge: true }
-        );
-      }
 
       showNotification(t('dashboard.smartCta.checkInSuccess'), 'success');
     } catch (error) {
@@ -527,6 +638,8 @@ const Dashboard = () => {
       if (recordId) {
         const ref = doc(attendanceCol, recordId);
         await updateDoc(ref, {
+          checkOutAt: now,
+          effectiveEndAt: now,
           visitEndedAt: now,
           notes: `Facility check-out by volunteer at ${new Date().toLocaleTimeString()}`
         });
@@ -538,23 +651,8 @@ const Dashboard = () => {
         checkedIn: false
       });
 
-      if (authUserId) {
-        const presenceRef = doc(db, 'facility_presence', authUserId);
-        await setDoc(
-          presenceRef,
-          {
-            userId: authUserId,
-            volunteerDocId: volunteer.id,
-            attendanceId: null,
-            status: 'out',
-            endedAt: now,
-            updatedAt: now
-          },
-          { merge: true }
-        );
-      }
-
       showNotification(t('dashboard.smartCta.checkOutSuccess'), 'success');
+      await fetchFacilityHours(volunteer.id, volunteer.appointmentHistory || []);
     } catch (error) {
       console.error('Error checking out (facility):', error);
       setFacilityAttendance(prev => ({ ...prev, loading: false }));
@@ -568,7 +666,6 @@ const Dashboard = () => {
       return;
     }
 
-    setFacilityAttendance(prev => ({ ...prev, loading: true }));
     try {
       const now = Timestamp.now();
       const todayStr = getTodayStr();
@@ -578,19 +675,49 @@ const Dashboard = () => {
       if (facilityAttendance.checkedIn && facilityAttendance.record?.id) {
         const ref = doc(attendanceCol, facilityAttendance.record.id);
         await updateDoc(ref, {
+          checkOutAt: now,
+          effectiveEndAt: now,
           visitEndedAt: now,
           notes: `Facility check-out by volunteer at ${new Date().toLocaleTimeString()}`
         });
 
+        // Also close any open session-based attendance intervals for today.
+        const sessionQuery = query(
+          attendanceCol,
+          where('volunteerId.id', '==', volunteer.id),
+          orderBy('confirmedAt', 'desc'),
+          limit(200)
+        );
+        const sessionSnap = await getDocs(sessionQuery);
+        const sessionRecords = sessionSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const openSessionRecords = sessionRecords.filter(r =>
+          r.appointmentId &&
+          (r.status === 'present' || r.status === 'late') &&
+          // same-day safety; avoids touching old history
+          (r.date === todayStr || !r.date) &&
+          !r.effectiveEndAt &&
+          !r.checkOutAt &&
+          !r.visitEndedAt
+        );
+        await Promise.all(
+          openSessionRecords.map(r =>
+            updateDoc(doc(attendanceCol, r.id), {
+              checkOutAt: now,
+              effectiveEndAt: now,
+              notes: (r.notes || '') + ` (checked out from dashboard at ${new Date().toLocaleTimeString()})`
+            })
+          )
+        );
+
+        showNotification(t('dashboard.smartCta.checkOutSuccess'), 'success');
+        await fetchFacilityHours(volunteer.id, volunteer.appointmentHistory || []);
+        await fetchTodayAppointmentAttendance();
+        // Reset local presence state
         setFacilityAttendance({
           loading: false,
           record: null,
           checkedIn: false
         });
-
-        showNotification(t('dashboard.smartCta.checkOutSuccess'), 'success');
-        await fetchFacilityAttendance();
-        await fetchTodayAppointmentAttendance();
         return;
       }
 
@@ -606,7 +733,12 @@ const Dashboard = () => {
       const snap = await getDocs(recentByVolunteer);
       const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const activeFacilityRecords = records
-        .filter(r => r.attendanceType === 'facility' && !r.visitEndedAt);
+        .filter(r =>
+          !r.appointmentId &&
+          (r.source === 'walkIn' || r.attendanceType === 'facility') &&
+          !r.effectiveEndAt &&
+          !r.visitEndedAt
+        );
 
       // Pick the most recent by confirmedAt
       const activeRecord = activeFacilityRecords.sort((a, b) => {
@@ -629,13 +761,15 @@ const Dashboard = () => {
         });
 
         showNotification(t('dashboard.smartCta.checkOutSuccess'), 'success');
+        await fetchFacilityHours(volunteer.id, volunteer.appointmentHistory || []);
         await fetchTodayAppointmentAttendance();
         return;
       }
 
       // No active facility check-in exists.
       // If volunteer "joined" a session today (attendance exists) but never checked in,
-      // allow a dashboard checkout by creating a closed facility record for reporting.
+      // allow a dashboard checkout by closing any open session intervals and creating
+      // a closed facility record for reporting.
       if (!todayAppointmentAttendance.hasJoined) {
         showNotification(t('dashboard.smartCta.notEligibleForCheckout'), 'info');
         setFacilityAttendance(prev => ({ ...prev, loading: false }));
@@ -644,14 +778,45 @@ const Dashboard = () => {
 
       const startedAt = todayAppointmentAttendance.earliestConfirmedAt || now;
 
+      // Close any open session-based attendance intervals for today.
+      const sessionQuery = query(
+        attendanceCol,
+        where('volunteerId.id', '==', volunteer.id),
+        orderBy('confirmedAt', 'desc'),
+        limit(200)
+      );
+      const sessionSnap = await getDocs(sessionQuery);
+      const sessionRecords = sessionSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const openSessionRecords = sessionRecords.filter(r =>
+        r.appointmentId &&
+        (r.status === 'present' || r.status === 'late') &&
+        (r.date === todayStr || !r.date) &&
+        !r.effectiveEndAt &&
+        !r.checkOutAt &&
+        !r.visitEndedAt
+      );
+      await Promise.all(
+        openSessionRecords.map(r =>
+          updateDoc(doc(attendanceCol, r.id), {
+            checkOutAt: now,
+            effectiveEndAt: now,
+            notes: (r.notes || '') + ` (checked out from dashboard at ${new Date().toLocaleTimeString()})`
+          })
+        )
+      );
+
       const attendanceData = {
-        attendanceType: 'facility',
+        source: 'walkIn',
         appointmentId: null,
         date: todayStr,
         volunteerId: { id: volunteer.id, type: 'volunteer' },
         status: 'present',
         confirmedBy: 'volunteer',
         confirmedAt: startedAt,
+        checkInAt: startedAt,
+        checkOutAt: now,
+        effectiveEndAt: now,
+        attendanceType: 'facility',
         visitStartedAt: startedAt,
         visitEndedAt: now,
         notes: `Facility checkout created from session attendance at ${new Date().toLocaleTimeString()}`
@@ -659,7 +824,13 @@ const Dashboard = () => {
 
       await addDoc(attendanceCol, attendanceData);
       showNotification(t('dashboard.smartCta.checkOutSuccess'), 'success');
+      await fetchFacilityHours(volunteer.id, volunteer.appointmentHistory || []);
       await fetchTodayAppointmentAttendance();
+      setFacilityAttendance({
+        loading: false,
+        record: null,
+        checkedIn: false
+      });
     } catch (error) {
       console.error('Error creating checkout record:', error);
       setFacilityAttendance(prev => ({ ...prev, loading: false }));
@@ -689,70 +860,68 @@ const Dashboard = () => {
         isWithinSessionWindow(session.startTime, session.endTime)
       );
 
-      // If there are no active appointment sessions right now, fall back to facility check-in/out
-      if (validSessions.length === 0) {
-        if (facilityAttendance.checkedIn) {
-          await handleFacilityCheckOut();
-        } else {
-          await handleFacilityCheckIn();
-        }
-        return;
+      // Determine if there is any active session that still needs to be logged.
+      const attendanceRef = collection(db, 'attendance');
+      const existingAttendanceQuery = validSessions.length
+        ? query(
+            attendanceRef,
+            where('volunteerId.id', '==', volunteer.id),
+            where('appointmentId', 'in', validSessions.map(s => s.appointmentId))
+          )
+        : null;
+
+      let existingAppointmentIds = [];
+      if (existingAttendanceQuery) {
+        const existingSnapshot = await getDocs(existingAttendanceQuery);
+        existingAppointmentIds = existingSnapshot.docs.map(doc => doc.data().appointmentId);
       }
 
-      // Check for existing attendance records
-      const attendanceRef = collection(db, 'attendance');
-      const existingAttendanceQuery = query(
-        attendanceRef,
-        where('volunteerId.id', '==', volunteer.id),
-        where('appointmentId', 'in', validSessions.map(s => s.appointmentId))
-      );
-      
-      const existingSnapshot = await getDocs(existingAttendanceQuery);
-      const existingAppointmentIds = existingSnapshot.docs.map(doc => doc.data().appointmentId);
-
-      // Filter out sessions that already have attendance records
       const sessionsToLog = validSessions.filter(session => 
         !existingAppointmentIds.includes(session.appointmentId)
       );
 
-      if (sessionsToLog.length === 0) {
-        // Sessions are already logged; allow the same button to report facility attendance.
-        if (facilityAttendance.checkedIn) {
-          await handleFacilityCheckOut();
-        } else {
-          await handleFacilityCheckIn();
-        }
+      // If there is at least one active, unlogged session, log it.
+      if (sessionsToLog.length > 0) {
+        const attendancePromises = sessionsToLog.map(async (session) => {
+          const status = getAttendanceStatus(session.startTime, session.endTime);
+          const nowTs = Timestamp.now();
+
+          const attendanceData = {
+            appointmentId: session.appointmentId,
+            volunteerId: { id: volunteer.id, type: 'volunteer' },
+            status: status,
+            confirmedBy: 'volunteer',
+            confirmedAt: nowTs,
+            // Session-based presence
+            source: 'session',
+            checkInAt: nowTs,
+            checkOutAt: null,
+            effectiveEndAt: null,
+            notes: `Session logged by volunteer at ${new Date().toLocaleTimeString()}`
+          };
+
+          return addDoc(attendanceRef, attendanceData);
+        });
+
+        await Promise.all(attendancePromises);
+
+        const loggedCount = sessionsToLog.length;
+        const statusText = sessionsToLog.some(s => getAttendanceStatus(s.startTime, s.endTime) === 'late')
+          ? t('dashboard.smartLogging.lateStatus')
+          : '';
+        
+        showNotification(t('dashboard.smartLogging.success', { count: loggedCount, statusText }), 'success');
+        
+        // Refresh data to show updated information
+        await fetchVolunteerData();
+        await fetchRecentActivity();
+        await fetchTodayAppointmentAttendance();
         return;
       }
 
-      // Log attendance for each valid session
-      const attendancePromises = sessionsToLog.map(async (session) => {
-        const status = getAttendanceStatus(session.startTime, session.endTime);
-        
-        const attendanceData = {
-          appointmentId: session.appointmentId,
-          volunteerId: { id: volunteer.id, type: 'volunteer' },
-          status: status,
-          confirmedBy: 'volunteer',
-          confirmedAt: Timestamp.now(),
-          notes: `Session logged by volunteer at ${new Date().toLocaleTimeString()}`
-        };
-
-        return addDoc(attendanceRef, attendanceData);
-      });
-
-      await Promise.all(attendancePromises);
-
-      const loggedCount = sessionsToLog.length;
-      const statusText = sessionsToLog.some(s => getAttendanceStatus(s.startTime, s.endTime) === 'late') ? t('dashboard.smartLogging.lateStatus') : '';
-      
-      showNotification(t('dashboard.smartLogging.success', { count: loggedCount, statusText }), 'success');
-      
-      // Refresh data to show updated information
-      await fetchVolunteerData();
-      await fetchRecentActivity();
-      await fetchTodayAppointmentAttendance();
-
+      // If we reached here, the button was invoked specifically to log sessions,
+      // and there are none left to log. Do nothing.
+      return;
     } catch (error) {
       console.error('Error logging session:', error);
       showNotification(t('dashboard.smartLogging.error'), 'error');
@@ -822,6 +991,8 @@ const Dashboard = () => {
           previousHours: previousHours,
           volunteerId: volunteerDoc.id
         });
+        await fetchFacilityHours(volunteerDoc.id, volunteerData.appointmentHistory || []);
+        await fetchAttendanceTotalHours(volunteerDoc.id, volunteerData.appointmentHistory || []);
       }
       setDataLoaded(prev => ({ ...prev, volunteerData: true }));
     } catch (error) {
@@ -1267,9 +1438,9 @@ const Dashboard = () => {
 
   // Update progress bars when data changes
   useEffect(() => {
-    if (userData.totalHours) {
+    if (effectiveTotalHours) {
       const maxHours = 200;
-      const value = Math.min(userData.totalHours, maxHours);
+      const value = Math.min(effectiveTotalHours, maxHours);
       const progressRatio = value / maxHours;
       const offset = 565.48 - (progressRatio * 565.48);
 
@@ -1278,7 +1449,7 @@ const Dashboard = () => {
         setAnimateHours(true);
       }, 200);
     }
-  }, [userData.totalHours]);
+  }, [effectiveTotalHours]);
 
   useEffect(() => {
     const timeInterval = setInterval(() => {
@@ -1313,8 +1484,6 @@ const Dashboard = () => {
     return t('dashboard.greeting.evening');
   };
 
-  const currentLevel = getLevel(userData.totalHours);
-
   if (loading) {
     return <LoadingScreen />;
   }
@@ -1337,49 +1506,110 @@ const Dashboard = () => {
                 const { activeSessionsNow, activeSessionsNeedingLog } = getTodaySessionContext();
                 const hasActiveSessionNow = activeSessionsNow.length > 0;
                 const hasUnloggedActiveSessionNow = activeSessionsNeedingLog.length > 0;
+                const disableCta = isLoggingSession;
+
+                // A volunteer is considered "in the facility" if they currently have ANY
+                // open attendance interval (walk-in or session):
+                //   - walk-in: active facilityAttendance record
+                //   - session: attendance record for today with present/late status whose
+                //              effectiveEndAt/checkOutAt/visitEndedAt is still in the future or null.
+                const nowMsVal = Date.now();
+
+                const hasActiveWalkIn = facilityAttendance.checkedIn;
+
+                const activeSessionRecords = (todayAppointmentAttendance.records || []).filter(r => {
+                  if (r.status !== 'present' && r.status !== 'late') return false;
+                  const startMs = toMillisSafe(r.checkInAt || r.visitStartedAt || r.confirmedAt);
+                  if (!startMs) return false;
+
+                  // Prefer explicit end markers from attendance
+                  let endMs = toMillisSafe(r.effectiveEndAt || r.checkOutAt || r.visitEndedAt);
+
+                  // If there is no recorded end yet but this is a session attendance,
+                  // derive the natural session end from appointmentHistory so the
+                  // volunteer is auto "checked out" when the session ends.
+                  if (!endMs && r.appointmentId && volunteer?.appointmentHistory) {
+                    const entry = volunteer.appointmentHistory.find(
+                      e => e.appointmentId === r.appointmentId
+                    );
+                    if (entry?.date && entry?.endTime) {
+                      try {
+                        const endDate = parseTimeAndCombineWithDate(entry.date, entry.endTime);
+                        endMs = endDate.getTime();
+                      } catch {
+                        // ignore parse errors; fall back to treating as still open
+                      }
+                    }
+                  }
+
+                  // If we still don't have an end, treat as open until explicitly closed.
+                  if (!endMs) return true;
+                  return endMs > nowMsVal;
+                });
+
+                const hasActiveSessionIntervalNow = activeSessionRecords.length > 0;
+                const isInFacilityNow = hasActiveWalkIn || hasActiveSessionIntervalNow;
+
+                // For the "since" time, prefer the walk-in start; otherwise use the earliest
+                // active session interval start.
+                let inSinceTs = facilityAttendance.record?.visitStartedAt || facilityAttendance.record?.confirmedAt || null;
+                if (!inSinceTs && activeSessionRecords.length > 0) {
+                  const earliest = activeSessionRecords.reduce((best, r) => {
+                    const ts = r.checkInAt || r.visitStartedAt || r.confirmedAt;
+                    if (!ts) return best;
+                    if (!best) return ts;
+                    // compare millis safely
+                    const bestMs = toMillisSafe(best);
+                    const thisMs = toMillisSafe(ts);
+                    return thisMs && (!bestMs || thisMs < bestMs) ? ts : best;
+                  }, null);
+                  inSinceTs = earliest;
+                }
+
                 const ctaTitle = isLoggingSession
                   ? t('dashboard.checkIn.logging')
                   : hasUnloggedActiveSessionNow
                     ? t('dashboard.checkIn.titleLogSession')
-                    : facilityAttendance.checkedIn
+                    : isInFacilityNow
                       ? t('dashboard.checkIn.titleCheckOut')
                       : t('dashboard.checkIn.titleCheckIn');
                 const ctaSubtitle = isLoggingSession
                   ? t('dashboard.checkIn.pleaseWait')
                   : hasUnloggedActiveSessionNow
                     ? t('dashboard.checkIn.subtitleLogSession')
-                    : facilityAttendance.checkedIn
+                    : isInFacilityNow
                       ? t('dashboard.checkIn.subtitleCheckOut')
                       : t('dashboard.checkIn.subtitleCheckIn');
-                const disableCta = isLoggingSession || facilityAttendance.loading;
 
                 return (
                   <>
                     <div
-                      className={`dash-facility-status ${facilityAttendance.checkedIn ? 'is-in' : 'is-out'}`}
+                      className={`dash-facility-status ${isInFacilityNow ? 'is-in' : 'is-out'}`}
                       role="status"
                       aria-live="polite"
                     >
                       <span className="dash-facility-dot" aria-hidden="true" />
                       <span className="dash-facility-text">
-                        {facilityAttendance.loading
-                          ? t('dashboard.facilityStatus.loading')
-                          : facilityAttendance.checkedIn
-                            ? t('dashboard.facilityStatus.inFacility', {
-                              time: formatTimeFromTimestamp(
-                                facilityAttendance.record?.visitStartedAt || facilityAttendance.record?.confirmedAt
-                              )
+                        {isInFacilityNow
+                          ? t('dashboard.facilityStatus.inFacility', {
+                            time: formatTimeFromTimestamp(inSinceTs)
+                          })
+                          : todayAppointmentAttendance.hasJoined
+                            ? t('dashboard.facilityStatus.notInFacilityWithSession', {
+                              time: formatTimeFromTimestamp(todayAppointmentAttendance.earliestConfirmedAt)
                             })
-                            : todayAppointmentAttendance.hasJoined
-                              ? t('dashboard.facilityStatus.notInFacilityWithSession', {
-                                time: formatTimeFromTimestamp(todayAppointmentAttendance.earliestConfirmedAt)
-                              })
-                              : t('dashboard.facilityStatus.notInFacility')}
+                            : t('dashboard.facilityStatus.notInFacility')}
                       </span>
                     </div>
 
                     <button
-                      onClick={handleSmartSessionLog}
+                      onClick={
+                        hasUnloggedActiveSessionNow
+                          ? handleSmartSessionLog
+                          : isInFacilityNow
+                            ? handleDashboardCheckOut
+                            : handleFacilityCheckIn
+                      }
                       disabled={disableCta}
                       className="dash-checkin-button"
                     >
@@ -1773,7 +2003,7 @@ const Dashboard = () => {
                       color: '#000000',
                       lineHeight: '1',
                       textShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
-                    }}>{userData.totalHours.toFixed(2).replace(/\.?0+$/, '')}</span>
+                    }}>{effectiveTotalHours.toFixed(2).replace(/\.?0+$/, '')}</span>
                     <span className="dash-hours-unit" style={{
                       fontSize: '1.25rem',
                       fontWeight: '600',
@@ -1910,7 +2140,7 @@ const Dashboard = () => {
                         <div
                           className="dash-level-progress-fill"
                           style={{
-                            width: `${Math.min(((userData.totalHours - getLevelStartHours(currentLevel.label)) / (getLevelEndHours(currentLevel.label) - getLevelStartHours(currentLevel.label))) * 100, 100)}%`,
+                            width: `${Math.min(((effectiveTotalHours - getLevelStartHours(currentLevel.label)) / (getLevelEndHours(currentLevel.label) - getLevelStartHours(currentLevel.label))) * 100, 100)}%`,
                             background: `linear-gradient(90deg, ${cardColors[2]?.primary}, ${cardColors[2]?.secondary})`,
                             height: '100%',
                             borderRadius: '6px',

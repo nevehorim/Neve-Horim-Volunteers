@@ -25,6 +25,8 @@
     "trackAttendance": "עקוב אחר נוכחות",
     "saveChanges": "שמור שינויים",
     "saving": "שומר...",
+    "recalculateStatus": "חשב מחדש סטטוס (שעון ישראל)",
+    "recalculating": "מחשב...",
     "deleteAppointment": "מחק פגישה",
     "deleting": "מוחק..."
   },

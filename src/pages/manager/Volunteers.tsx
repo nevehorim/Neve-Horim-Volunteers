@@ -529,6 +529,7 @@ const ManagerVolunteers = () => {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedVolunteer, setSelectedVolunteer] = useState<VolunteerUI | null>(null);
+  // New volunteer state (for create dialog)
   const [newVolunteer, setNewVolunteer] = useState<Omit<Volunteer, 'id'>>({
     userId: "", // Will be generated upon user creation
     fullName: "",
@@ -545,6 +546,8 @@ const ManagerVolunteers = () => {
     createdAt: Timestamp.now(),
     notes: null
   });
+  // Optional email for Google sign-in when creating a volunteer
+  const [newVolunteerEmail, setNewVolunteerEmail] = useState<string>("");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [sortState, setSortState] = useState<{
     field: "fullName" | "totalHours" | "totalSessions" | "createdAt" | "age";
@@ -588,6 +591,7 @@ const ManagerVolunteers = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [editedUsername, setEditedUsername] = useState("");
   const [editedPassword, setEditedPassword] = useState("");
+  const [editedEmail, setEditedEmail] = useState("");
 
   // Phone number validation states
   const [phoneNumberError, setPhoneNumberError] = useState<string | null>(null);
@@ -877,6 +881,19 @@ const ManagerVolunteers = () => {
         return;
       }
 
+      // Optional email validation for Google sign-in
+      const trimmedNewEmail = (newVolunteerEmail || "").trim();
+      if (trimmedNewEmail) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(trimmedNewEmail)) {
+          toast({
+            title: t('volunteers:errors.invalidEmail'),
+            variant: "destructive"
+          });
+          return;
+        }
+      }
+
       // Validate full name
       if (!validateFullName(newVolunteer.fullName)) {
         const error = getFullNameError(newVolunteer.fullName);
@@ -926,7 +943,9 @@ const ManagerVolunteers = () => {
         fullName: newVolunteer.fullName,
         role: "volunteer",
         isActive: true,
-        createdAt: Timestamp.now()
+        createdAt: Timestamp.now(),
+        // Optional email used for Google sign-in lookup
+        ...(trimmedNewEmail ? { email: trimmedNewEmail } : {})
       };
 
       const userRef = await addUser(newUser);
@@ -984,6 +1003,7 @@ const ManagerVolunteers = () => {
         reasonForVolunteering: null,
         availability: { monday: [], tuesday: [], wednesday: [], thursday: [], friday: [], saturday: [], sunday: [] }, // Reset availability
       });
+      setNewVolunteerEmail("");
     } catch (error) {
       console.error("Error creating user or volunteer:", error);
       toast({
@@ -1071,6 +1091,22 @@ const ManagerVolunteers = () => {
           username: editedUsername,
           isActive: selectedVolunteer.isActive // Sync the isActive status with the volunteer
         };
+
+        // Email for Google sign-in (optional; empty string clears it)
+        const trimmedEmail = editedEmail.trim();
+        if (trimmedEmail) {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(trimmedEmail)) {
+            toast({
+              title: t('volunteers:errors.invalidEmail'),
+              variant: "destructive"
+            });
+            return;
+          }
+          userUpdateData.email = trimmedEmail;
+        } else {
+          userUpdateData.email = null; // or "" to clear; Firestore accepts both
+        }
 
         // Only update password if a new one is provided
         if (editedPassword.trim()) {
@@ -1597,6 +1633,7 @@ const ManagerVolunteers = () => {
               const user = users.find(u => u.id === volunteer.userId);
               setEditedUsername(user?.username || "");
               setEditedPassword(""); // Don't show the hashed password
+              setEditedEmail(user?.email ?? "");
               setIsEditDialogOpen(true);
             }}
             className="text-primary hover:text-primary/90 hover:bg-primary/5"
@@ -1636,6 +1673,7 @@ const ManagerVolunteers = () => {
           const user = users.find(u => u.id === volunteer.userId);
           setEditedUsername(user?.username || "");
           setEditedPassword(""); // Don't show the hashed password
+          setEditedEmail(user?.email ?? "");
           setIsEditDialogOpen(true);
         }
       }
@@ -2129,6 +2167,7 @@ const ManagerVolunteers = () => {
                                     const user = users.find(u => u.id === volunteer.userId);
                                     setEditedUsername(user?.username || "");
                                     setEditedPassword(""); // Don't show the hashed password
+                                    setEditedEmail(user?.email ?? "");
                                     setIsEditDialogOpen(true);
                                   }}
                                   className="bg-gray-100 border border-gray-400/75 hover:bg-gray-200 hover:border-gray-400 flex items-center space-x-2"
@@ -2300,6 +2339,23 @@ const ManagerVolunteers = () => {
                     )}
                   />
                   {fullNameError && <p className="text-sm text-red-600 mt-1">{t(fullNameError, { ns: 'volunteers' })}</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="email" className="text-sm font-medium text-slate-700">{t('forms.emailForGoogleSignIn')}</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder={t('forms.enterEmailPlaceholder')}
+                    value={newVolunteerEmail}
+                    onChange={(e) => setNewVolunteerEmail(e.target.value)}
+                    className={cn(
+                      "h-10 bg-white border-slate-300 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0",
+                      isRTL && "text-right"
+                    )}
+                    dir="ltr"
+                  />
+                  <p className="text-xs text-slate-500">{t('forms.emailForGoogleSignInHint')}</p>
                 </div>
 
                 <div className="space-y-2">
@@ -2732,6 +2788,23 @@ const ManagerVolunteers = () => {
                       </Button>
                     </div>
                     {editPasswordError && <p className="text-sm text-red-600 mt-1">{t(editPasswordError, { ns: 'volunteers' })}</p>}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-email" className="text-sm font-medium text-slate-700">{t('forms.emailForGoogleSignIn')}</Label>
+                    <Input
+                      id="edit-email"
+                      type="email"
+                      placeholder={t('forms.enterEmailPlaceholder')}
+                      value={editedEmail}
+                      onChange={(e) => setEditedEmail(e.target.value)}
+                      className={cn(
+                        "h-10 bg-white border-slate-300 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0",
+                        isRTL && "text-right"
+                      )}
+                      dir="ltr"
+                    />
+                    <p className="text-xs text-slate-500">{t('forms.emailForGoogleSignInHint')}</p>
                   </div>
 
                   <div className="space-y-2">

@@ -1237,9 +1237,13 @@ const Attendance = () => {
         const snap = await getDocs(q);
         const records = snap.docs
           .map(d => ({ id: d.id, ...d.data() }))
-          .filter(r => r.attendanceType === 'facility' && getRecordDate(r) === todayStr);
+          .filter(r =>
+            !r.appointmentId &&
+            (r.source === 'walkIn' || r.attendanceType === 'facility') &&
+            getRecordDate(r) === todayStr
+          );
 
-        const activeRecord = records.find(r => !r.visitEndedAt);
+        const activeRecord = records.find(r => !r.effectiveEndAt && !r.visitEndedAt);
 
         setFacilityAttendance({
           loading: false,
@@ -1279,13 +1283,17 @@ const Attendance = () => {
       const todayStr = getTodayStr();
 
       const attendanceData = {
-        attendanceType: 'facility',
+        source: 'walkIn',
         appointmentId: null,
         date: todayStr,
         volunteerId: { id: volunteer.id, type: 'volunteer' },
         status: 'present',
         confirmedBy: 'volunteer',
         confirmedAt: now,
+        checkInAt: now,
+        checkOutAt: null,
+        effectiveEndAt: null,
+        attendanceType: 'facility',
         visitStartedAt: now,
         visitEndedAt: null,
         notes: `Facility check-in by volunteer at ${new Date().toLocaleTimeString()}`
@@ -1298,24 +1306,6 @@ const Attendance = () => {
         record: { id: docRef.id, ...attendanceData },
         checkedIn: true
       });
-
-      // Update current facility presence (cross-device, keyed by auth userId)
-      if (userId) {
-        const presenceRef = doc(db, 'facility_presence', userId);
-        await setDoc(
-          presenceRef,
-          {
-            userId,
-            volunteerDocId: volunteer.id,
-            attendanceId: docRef.id,
-            status: 'in',
-            startedAt: now,
-            endedAt: null,
-            updatedAt: now
-          },
-          { merge: true }
-        );
-      }
 
       toast({
         title: t('attendance.notifications.facilityCheckInSuccess'),
@@ -1358,8 +1348,14 @@ const Attendance = () => {
           limit(200)
         );
         const snap = await getDocs(q);
-        const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const activeRecord = records.find(r => r.attendanceType === 'facility' && getRecordDate(r) === todayStr && !r.visitEndedAt);
+      const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const activeRecord = records.find(r =>
+        !r.appointmentId &&
+        (r.source === 'walkIn' || r.attendanceType === 'facility') &&
+        getRecordDate(r) === todayStr &&
+        !r.effectiveEndAt &&
+        !r.visitEndedAt
+      );
         recordId = activeRecord?.id;
       }
 
@@ -1374,6 +1370,8 @@ const Attendance = () => {
 
       const ref = doc(attendanceRef, recordId);
       await updateDoc(ref, {
+        checkOutAt: now,
+        effectiveEndAt: now,
         visitEndedAt: now,
         notes: `Facility check-out by volunteer at ${new Date().toLocaleTimeString()}`
       });
@@ -1383,23 +1381,6 @@ const Attendance = () => {
         record: null,
         checkedIn: false
       });
-
-      // Update current facility presence (cross-device, keyed by auth userId)
-      if (userId) {
-        const presenceRef = doc(db, 'facility_presence', userId);
-        await setDoc(
-          presenceRef,
-          {
-            userId,
-            volunteerDocId: volunteer.id,
-            attendanceId: null,
-            status: 'out',
-            endedAt: now,
-            updatedAt: now
-          },
-          { merge: true }
-        );
-      }
 
       toast({
         title: t('attendance.notifications.facilityCheckOutSuccess'),

@@ -4,11 +4,16 @@
   "username": "Username",
   "password": "Password",
   "login_button": "Sign In",
+  "login_or": "or",
+  "sign_in_with_google": "Sign in with Google",
   "Back_to_home_page": "Return to Homepage",
   "error_fill_fields": "Please complete all required fields to proceed.",
   "error_user_not_found": "The specified username does not exist in our system.",
   "error_user_inactive": "Your account has been deactivated. Please contact the administrator for assistance.",
   "error_invalid_role": "Your account does not have the appropriate permissions to access this system.",
   "error_wrong_credentials": "The username or password entered is incorrect. Please verify your credentials and try again.",
-  "error_login_failed": "Authentication failed. Please try again or contact support if the issue persists."
+  "error_login_failed": "Authentication failed. Please try again or contact support if the issue persists.",
+  "error_no_account_linked": "No account is linked to this Google email. Contact your manager or use username and password.",
+  "error_google_no_email": "Your Google account did not provide an email. Sign in with username and password instead.",
+  "error_google_cancelled": "Sign-in was cancelled."
 }

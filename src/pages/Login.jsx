@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getDocs, query, where } from "firebase/firestore";
+import { signInWithPopup, GoogleAuthProvider } from "firebase/auth";
+import { auth } from '@/lib/firebase';
 import { usersRef } from '@/services/firestore';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -175,6 +177,69 @@ export default function LoginPage() {
     }
   };
 
+  const handleGoogleLogin = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const email = result.user?.email;
+      if (!email) {
+        setError(t("error_google_no_email"));
+        setLoading(false);
+        return;
+      }
+      const q = query(usersRef, where("email", "==", email));
+      const querySnapShot = await getDocs(q);
+      if (querySnapShot.empty) {
+        setError(t("error_no_account_linked"));
+        setLoading(false);
+        return;
+      }
+      const userDoc = querySnapShot.docs[0];
+      const userData = userDoc.data();
+      const role = userData.role;
+      if (!userData.isActive) {
+        setError(t("error_user_inactive"));
+        setLoading(false);
+        return;
+      }
+      localStorage.setItem("role", role);
+      localStorage.setItem("userId", userDoc.id);
+      localStorage.setItem("username", userData.username);
+      localStorage.setItem("user", JSON.stringify({
+        id: userDoc.id,
+        username: userData.username,
+        role: userData.role,
+      }));
+      dispatch(loginSuccess({
+        user: {
+          id: userDoc.id,
+          username: userData.username,
+          role: userData.role,
+          email: userData.email || email,
+        },
+        token: 'firebase-authenticated',
+      }));
+      if (role === 'volunteer') {
+        navigate('/volunteer');
+      } else if (role === 'manager') {
+        navigate('/manager');
+      } else {
+        setError(t("error_invalid_role"));
+        setLoading(false);
+      }
+    } catch (err) {
+      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+        setError(t("error_google_cancelled"));
+      } else {
+        console.error("Google login error:", err);
+        setError(t("error_login_failed"));
+      }
+      setLoading(false);
+    }
+  };
+
   if (loading) return <LoadingScreen />;
 
   return (
@@ -263,10 +328,22 @@ export default function LoginPage() {
             </div>
 
             <button 
-              type = "submit"
+              type="submit"
               className="login-button"
             >
               {t("login_button")}
+            </button>
+
+            <div className="login-divider">
+              <span>{t("login_or")}</span>
+            </div>
+
+            <button
+              type="button"
+              className="login-button login-button-google"
+              onClick={handleGoogleLogin}
+            >
+              {t("sign_in_with_google")}
             </button>
 
             {error && (

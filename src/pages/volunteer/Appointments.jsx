@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { fromZonedTime } from "date-fns-tz";
 import LoadingScreen from "@/components/volunteer/InnerLS";
 import "./styles/Appointments.css";
 import { Layout } from '@/components/volunteer/Layout';
@@ -11,6 +12,40 @@ import { Layout } from '@/components/volunteer/Layout';
 // Import proper Firestore hooks and types
 import { useCalendarSlots } from "@/hooks/useFirestoreCalendar";
 import { useVolunteers } from "@/hooks/useFirestoreVolunteers";
+
+const TIMEZONE = 'Asia/Jerusalem';
+
+/** Normalize date string to YYYY-MM-DD for Israel-time parsing (avoids timezone shifts). */
+function toYYYYMMDD(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return String(dateStr ?? '');
+  const trimmed = String(dateStr).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const isoDatePart = trimmed.includes('T') ? trimmed.split('T')[0] : trimmed.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(isoDatePart)) return isoDatePart;
+  const d = new Date(trimmed);
+  if (isNaN(d.getTime())) return trimmed;
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Session timing in Israel: past = ended, ongoing = in progress, future = not started. */
+function getSessionTimingInIsrael(date, startTime, endTime) {
+  try {
+    const now = new Date();
+    const ymd = toYYYYMMDD(date);
+    const startPart = (startTime && startTime.length >= 5) ? startTime.slice(0, 5) : (startTime || '00:00');
+    const endPart = (endTime && endTime.length >= 5) ? endTime.slice(0, 5) : (endTime || '00:00');
+    const sessionStart = fromZonedTime(`${ymd}T${startPart}:00`, TIMEZONE);
+    const sessionEnd = fromZonedTime(`${ymd}T${endPart}:00`, TIMEZONE);
+    if (sessionEnd <= now) return 'past';
+    if (sessionStart <= now && sessionEnd > now) return 'ongoing';
+    return 'future';
+  } catch {
+    return 'future';
+  }
+}
 
 // Helper function to convert time to minutes for sorting
 const timeToMinutes = (timeStr) => {
@@ -257,49 +292,25 @@ export default function Appointments() {
           slot = slots.find(s => s.id === appointmentEntry.appointmentId);
         }
 
-        console.log(`History appointment ${appointmentEntry.appointmentId}:`, {
-          appointmentId: appointmentEntry.appointmentId,
-          slotFound: !!slot,
-          slotId: slot?.id,
-          slotAppointmentId: slot?.appointmentId,
-          sessionCategory: slot?.sessionCategory,
-          customLabel: slot?.customLabel,
-          categoryDisplay: getCategoryDisplay(slot),
-          originalStatus: appointmentEntry.status,
-          appointmentDate: appointmentEntry.date,
-          isPast: new Date(appointmentEntry.date) < new Date()
-        });
-
-        // Determine the correct status based on appointment state and date
-        const appointmentDate = new Date(appointmentEntry.date);
-        const now = new Date();
-        const isPast = appointmentDate < now;
+        // Use Israel time so status matches manager and is correct regardless of user timezone
+        const timing = getSessionTimingInIsrael(
+          appointmentEntry.date,
+          appointmentEntry.startTime || '00:00',
+          appointmentEntry.endTime || '00:00'
+        );
         const actualStatus = appointmentEntry.status || "upcoming";
-        
-        // For history appointments, determine status based on actual state and date
         let displayStatus = actualStatus;
-        
-        // Handle different status scenarios
-        if (isPast) {
-          // For past appointments, override certain statuses
+        if (timing === 'past') {
           if (actualStatus === "upcoming" || actualStatus === "inProgress") {
-            // Past appointments that were upcoming or in progress should be completed
             displayStatus = "completed";
           } else if (actualStatus === "canceled") {
             displayStatus = "canceled";
           }
-          // Keep other statuses as they are (completed, etc.)
+        } else if (timing === 'ongoing') {
+          displayStatus = "inProgress";
         } else {
-          // For future appointments, keep the actual status
           displayStatus = actualStatus;
         }
-
-        console.log(`Status determination for ${appointmentEntry.appointmentId}:`, {
-          originalStatus: actualStatus,
-          isPast: isPast,
-          finalStatus: displayStatus,
-          appointmentDate: appointmentEntry.date
-        });
 
         return {
           id: appointmentEntry.appointmentId,
@@ -434,33 +445,24 @@ export default function Appointments() {
   }, [currentVolunteer, slots, t, i18n.language]);
 
 
-  // Filter appointments by tab
+  // Filter appointments by tab (use display status from Israel-time logic, not raw date)
   const tabAppointments = useMemo(() => {
     return userAppointments.filter((a) => {
-      const dateObj = new Date(a.rawData.date);
-      const now = new Date();
-
       if (tab === "upcoming") {
-        // Only show appointments from appointmentHistory (confirmed appointments)
-        // that are not completed and are in the future
         const isFromHistory = currentVolunteer.appointmentHistory?.some(appointment =>
           appointment.appointmentId === a.appointmentId
         );
-        // Check for AppointmentStatus values
-        const isNotCompleted = a.appointmentStatus !== "completed" && a.appointmentStatus !== "canceled";
-        const isFuture = dateObj >= now;
-        return isFromHistory && isNotCompleted && isFuture;
+        // a.status is display status (upcoming/inProgress/completed/canceled) from Israel time
+        const isUpcomingOrInProgress = a.status === "upcoming" || a.status === "inProgress";
+        return isFromHistory && isUpcomingOrInProgress;
       }
       if (tab === "past") {
-        // Show completed appointments from appointmentHistory
         const isFromHistory = currentVolunteer.appointmentHistory?.some(appointment =>
           appointment.appointmentId === a.appointmentId
         );
-        // Check for AppointmentStatus values
-        return isFromHistory && (a.appointmentStatus === "completed" || a.appointmentStatus === "canceled" || dateObj < now);
+        return isFromHistory && (a.status === "completed" || a.status === "canceled");
       }
       if (tab === "pending") {
-        // Show appointments where volunteer request status is pending (VolunteerRequestStatus)
         return a.status === "pending";
       }
       return false;
