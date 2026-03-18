@@ -257,6 +257,16 @@ const Dashboard = () => {
       return 0;
     }
   };
+  const formatHoursAsHHMM = (hoursDecimal) => {
+    try {
+      const totalMinutes = Math.max(0, Math.round((Number(hoursDecimal) || 0) * 60));
+      const hh = Math.floor(totalMinutes / 60);
+      const mm = totalMinutes % 60;
+      return `${hh}:${String(mm).padStart(2, '0')}`;
+    } catch {
+      return '0:00';
+    }
+  };
 
   // Helper function to parse time string and combine with date
   const parseTimeAndCombineWithDate = (dateStr, timeStr) => {
@@ -2115,7 +2125,7 @@ const Dashboard = () => {
                       color: '#000000',
                       lineHeight: '1',
                       textShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
-                    }}>{effectiveTotalHours.toFixed(2).replace(/\.?0+$/, '')}</span>
+                    }}>{formatHoursAsHHMM(effectiveTotalHours)}</span>
                     <span className="dash-hours-unit" style={{
                       fontSize: '1.25rem',
                       fontWeight: '600',
