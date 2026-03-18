@@ -359,6 +359,16 @@ const Dashboard = () => {
       return null;
     }
   };
+  const endOfDayMsFromDateStr = (dateStr) => {
+    try {
+      if (!dateStr) return null;
+      const d = parseTimeAndCombineWithDate(dateStr, '23:59');
+      if (!d || Number.isNaN(d.getTime())) return null;
+      return d.getTime() + (59 * 1000);
+    } catch {
+      return null;
+    }
+  };
 
   const chunkArray = (arr, size) => {
     const chunks = [];
@@ -438,13 +448,17 @@ const Dashboard = () => {
           (!r.appointmentId && (r.source === 'walkIn' || r.attendanceType === 'facility'))
         );
       const now = nowMs();
+      const todayStr = getTodayStr();
       let total = 0;
       for (const r of records) {
         // Prefer new timing fields; fall back to legacy visitStartedAt/confirmedAt
         const startMs = toMillisSafe(r.checkInAt || r.visitStartedAt || r.confirmedAt);
         if (!startMs) continue;
         const endMsRaw = toMillisSafe(r.effectiveEndAt || r.checkOutAt || r.visitEndedAt);
-        const endMs = endMsRaw || now;
+        const capMs = (r.date && r.date !== todayStr)
+          ? (endOfDayMsFromDateStr(r.date) || startMs)
+          : now;
+        const endMs = endMsRaw || capMs;
         if (!endMs || endMs <= startMs) continue;
         const intervalMs = endMs - startMs;
         const overlapMs = calculateOverlapMs(startMs, endMs, mergedSessionIntervals);
@@ -477,12 +491,29 @@ const Dashboard = () => {
 
       let totalHours = 0;
       const nowMs = () => Date.now();
+      const todayStr = getTodayStr();
 
       for (const r of records) {
         const startMs = toMillisSafe(r.checkInAt || r.visitStartedAt || r.confirmedAt);
         if (!startMs) continue;
-        const endMsRaw = toMillisSafe(r.effectiveEndAt || r.checkOutAt || r.visitEndedAt);
-        const endMs = endMsRaw || nowMs();
+        let endMsRaw = toMillisSafe(r.effectiveEndAt || r.checkOutAt || r.visitEndedAt);
+
+        if (!endMsRaw && r.appointmentId && appointmentHistory?.length) {
+          const entry = appointmentHistory.find(e => e.appointmentId === r.appointmentId);
+          if (entry?.date && entry?.endTime) {
+            try {
+              const endDate = parseTimeAndCombineWithDate(entry.date, entry.endTime);
+              endMsRaw = endDate.getTime();
+            } catch {
+              // ignore; fall back below
+            }
+          }
+        }
+
+        const capMs = (r.date && r.date !== todayStr)
+          ? (endOfDayMsFromDateStr(r.date) || startMs)
+          : nowMs();
+        const endMs = endMsRaw || capMs;
         if (!endMs || endMs <= startMs) continue;
         const intervalMs = endMs - startMs;
         totalHours += intervalMs / (1000 * 60 * 60);
@@ -492,6 +523,49 @@ const Dashboard = () => {
     } catch (error) {
       console.error('Error calculating attendance total hours:', error);
       setAttendanceTotalHours(null);
+    }
+  };
+
+  const syncFacilityAttendanceFromFirestore = async (volunteerId) => {
+    try {
+      if (!volunteerId) return;
+      const todayStr = getTodayStr();
+      const attendanceCol = collection(db, 'attendance');
+      const recentByVolunteer = query(
+        attendanceCol,
+        where('volunteerId.id', '==', volunteerId),
+        orderBy('confirmedAt', 'desc'),
+        limit(200)
+      );
+      const snap = await getDocs(recentByVolunteer);
+      const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const openWalkIn = records.find(r =>
+        !r.appointmentId &&
+        (r.source === 'walkIn' || r.attendanceType === 'facility') &&
+        (r.status === 'present' || r.status === 'late') &&
+        (r.date === todayStr || !r.date) &&
+        !r.effectiveEndAt &&
+        !r.checkOutAt &&
+        !r.visitEndedAt
+      );
+
+      if (openWalkIn?.id) {
+        setFacilityAttendance({
+          loading: false,
+          record: openWalkIn,
+          checkedIn: true
+        });
+        return;
+      }
+
+      setFacilityAttendance(prev => ({
+        ...prev,
+        loading: false,
+        record: null,
+        checkedIn: false
+      }));
+    } catch (error) {
+      console.error('Error syncing facility attendance:', error);
     }
   };
 
@@ -750,6 +824,8 @@ const Dashboard = () => {
       if (activeRecord?.id) {
         const ref = doc(attendanceCol, activeRecord.id);
         await updateDoc(ref, {
+          checkOutAt: now,
+          effectiveEndAt: now,
           visitEndedAt: now,
           notes: `Facility check-out by volunteer at ${new Date().toLocaleTimeString()}`
         });
@@ -991,6 +1067,7 @@ const Dashboard = () => {
           previousHours: previousHours,
           volunteerId: volunteerDoc.id
         });
+        await syncFacilityAttendanceFromFirestore(volunteerDoc.id);
         await fetchFacilityHours(volunteerDoc.id, volunteerData.appointmentHistory || []);
         await fetchAttendanceTotalHours(volunteerDoc.id, volunteerData.appointmentHistory || []);
       }
