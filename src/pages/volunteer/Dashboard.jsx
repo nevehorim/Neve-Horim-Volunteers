@@ -140,6 +140,24 @@ const Dashboard = () => {
       return { userId: null, username: null };
     }
   };
+  const getVolunteerAttendanceIds = (volLike) => {
+    try {
+      const { userId, username } = getStoredAuth();
+      const ids = [
+        volLike?.id,
+        volLike?.userId,
+        authUserId,
+        userId,
+        username,
+      ]
+        .filter(Boolean)
+        .map(v => String(v).trim())
+        .filter(Boolean);
+      return Array.from(new Set(ids)).slice(0, 10);
+    } catch {
+      return [];
+    }
+  };
 
   // Check authentication
   useEffect(() => {
@@ -434,12 +452,19 @@ const Dashboard = () => {
         }
       });
       const mergedSessionIntervals = mergeIntervals(sessionIntervals);
-      const q = query(
-        attendanceCol,
-        where('volunteerId.id', '==', volunteerId),
-        orderBy('confirmedAt', 'desc'),
-        limit(1000)
-      );
+      // Avoid `where` + `orderBy` composite index requirements in prod.
+      const ids = getVolunteerAttendanceIds({ id: volunteerId });
+      const q = ids.length > 1
+        ? query(
+            attendanceCol,
+            where('volunteerId.id', 'in', ids),
+            limit(1000)
+          )
+        : query(
+            attendanceCol,
+            where('volunteerId.id', '==', volunteerId),
+            limit(1000)
+          );
       const snap = await getDocs(q);
       const records = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
@@ -480,10 +505,10 @@ const Dashboard = () => {
         return;
       }
       const attendanceCol = collection(db, 'attendance');
-      const q = query(
-        attendanceCol,
-        where('volunteerId.id', '==', volunteerId)
-      );
+      const ids = getVolunteerAttendanceIds({ id: volunteerId });
+      const q = ids.length > 1
+        ? query(attendanceCol, where('volunteerId.id', 'in', ids))
+        : query(attendanceCol, where('volunteerId.id', '==', volunteerId));
       const snap = await getDocs(q);
       const records = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
@@ -531,15 +556,22 @@ const Dashboard = () => {
       if (!volunteerId) return;
       const todayStr = getTodayStr();
       const attendanceCol = collection(db, 'attendance');
-      const recentByVolunteer = query(
-        attendanceCol,
-        where('volunteerId.id', '==', volunteerId),
-        orderBy('confirmedAt', 'desc'),
-        limit(200)
-      );
+      // Avoid `where` + `orderBy` composite index requirements in prod.
+      const ids = getVolunteerAttendanceIds({ id: volunteerId });
+      const recentByVolunteer = ids.length > 1
+        ? query(
+            attendanceCol,
+            where('volunteerId.id', 'in', ids),
+            limit(300)
+          )
+        : query(
+            attendanceCol,
+            where('volunteerId.id', '==', volunteerId),
+            limit(300)
+          );
       const snap = await getDocs(recentByVolunteer);
       const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const openWalkIn = records.find(r =>
+      const openWalkIns = records.filter(r =>
         !r.appointmentId &&
         (r.source === 'walkIn' || r.attendanceType === 'facility') &&
         (r.status === 'present' || r.status === 'late') &&
@@ -548,6 +580,13 @@ const Dashboard = () => {
         !r.checkOutAt &&
         !r.visitEndedAt
       );
+      const openWalkIn = openWalkIns
+        .slice()
+        .sort((a, b) => {
+          const aMs = toMillisSafe(a.confirmedAt) || 0;
+          const bMs = toMillisSafe(b.confirmedAt) || 0;
+          return bMs - aMs;
+        })[0];
 
       if (openWalkIn?.id) {
         setFacilityAttendance({
@@ -744,6 +783,7 @@ const Dashboard = () => {
       const now = Timestamp.now();
       const todayStr = getTodayStr();
       const attendanceCol = collection(db, 'attendance');
+      const attendanceIds = getVolunteerAttendanceIds(volunteer);
 
       // Fast-path: if we already have an active facility record id, close it directly.
       if (facilityAttendance.checkedIn && facilityAttendance.record?.id) {
@@ -755,33 +795,34 @@ const Dashboard = () => {
           notes: `Facility check-out by volunteer at ${new Date().toLocaleTimeString()}`
         });
 
-        // Also close any open session-based attendance intervals for today.
-        const sessionQuery = query(
-          attendanceCol,
-          where('volunteerId.id', '==', volunteer.id),
-          orderBy('confirmedAt', 'desc'),
-          limit(200)
-        );
-        const sessionSnap = await getDocs(sessionQuery);
-        const sessionRecords = sessionSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const openSessionRecords = sessionRecords.filter(r =>
-          r.appointmentId &&
-          (r.status === 'present' || r.status === 'late') &&
-          // same-day safety; avoids touching old history
-          (r.date === todayStr || !r.date) &&
-          !r.effectiveEndAt &&
-          !r.checkOutAt &&
-          !r.visitEndedAt
-        );
-        await Promise.all(
-          openSessionRecords.map(r =>
-            updateDoc(doc(attendanceCol, r.id), {
-              checkOutAt: now,
-              effectiveEndAt: now,
-              notes: (r.notes || '') + ` (checked out from dashboard at ${new Date().toLocaleTimeString()})`
-            })
-          )
-        );
+        // Best-effort: also close any open session-based attendance intervals for today.
+        // This must NOT block the walk-in checkout (prod may lack composite indexes).
+        try {
+          const sessionQuery = attendanceIds.length > 1
+            ? query(attendanceCol, where('volunteerId.id', 'in', attendanceIds), limit(300))
+            : query(attendanceCol, where('volunteerId.id', '==', volunteer.id), limit(300));
+          const sessionSnap = await getDocs(sessionQuery);
+          const sessionRecords = sessionSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const openSessionRecords = sessionRecords.filter(r =>
+            r.appointmentId &&
+            (r.status === 'present' || r.status === 'late') &&
+            (r.date === todayStr || !r.date) &&
+            !r.effectiveEndAt &&
+            !r.checkOutAt &&
+            !r.visitEndedAt
+          );
+          await Promise.all(
+            openSessionRecords.map(r =>
+              updateDoc(doc(attendanceCol, r.id), {
+                checkOutAt: now,
+                effectiveEndAt: now,
+                notes: (r.notes || '') + ` (checked out from dashboard at ${new Date().toLocaleTimeString()})`
+              })
+            )
+          );
+        } catch (err) {
+          console.error('Non-fatal: failed closing session intervals during checkout:', err);
+        }
 
         showNotification(t('dashboard.smartCta.checkOutSuccess'), 'success');
         await fetchFacilityHours(volunteer.id, volunteer.appointmentHistory || []);
@@ -797,12 +838,9 @@ const Dashboard = () => {
 
       // Robust-path: avoid compound queries (which may require composite indexes).
       // Fetch recent attendance docs for this volunteer and filter client-side.
-      const recentByVolunteer = query(
-        attendanceCol,
-        where('volunteerId.id', '==', volunteer.id),
-        orderBy('confirmedAt', 'desc'),
-        limit(200)
-      );
+      const recentByVolunteer = attendanceIds.length > 1
+        ? query(attendanceCol, where('volunteerId.id', 'in', attendanceIds), limit(300))
+        : query(attendanceCol, where('volunteerId.id', '==', volunteer.id), limit(300));
 
       const snap = await getDocs(recentByVolunteer);
       const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -855,12 +893,9 @@ const Dashboard = () => {
       const startedAt = todayAppointmentAttendance.earliestConfirmedAt || now;
 
       // Close any open session-based attendance intervals for today.
-      const sessionQuery = query(
-        attendanceCol,
-        where('volunteerId.id', '==', volunteer.id),
-        orderBy('confirmedAt', 'desc'),
-        limit(200)
-      );
+      const sessionQuery = attendanceIds.length > 1
+        ? query(attendanceCol, where('volunteerId.id', 'in', attendanceIds), limit(300))
+        : query(attendanceCol, where('volunteerId.id', '==', volunteer.id), limit(300));
       const sessionSnap = await getDocs(sessionQuery);
       const sessionRecords = sessionSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const openSessionRecords = sessionRecords.filter(r =>
